@@ -1,0 +1,20 @@
+# Game data and anything derived from it
+*.iso
+*.bin
+*.AFS
+*.OLK
+*.IRX
+*.irx
+*.elf
+SLUS_*
+SYSTEM.CNF
+disc/
+iso/
+recomp/output/
+recomp/ghidra/
+*.sfd
+*.rgba
+*.wav
+*.png
+*.log
+runs/
