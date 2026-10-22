@@ -118,31 +118,35 @@ namespace
             return true;
         }
 
-        // The current frame as IPU CSC output: RGBA32 16x16 macroblocks, column by column.
-        bool currentMacroblocks(uint8_t *out, uint32_t capacity, uint32_t &width, uint32_t &height, uint32_t &number)
+        // The current frame as IPU CSC output: RGBA32 16x16 macroblocks, column by column. Alpha
+        // movies carry their alpha as the luma of the frame's bottom half.
+        bool currentMacroblocks(uint8_t *out, uint32_t capacity, bool alphaMovie, uint32_t &width, uint32_t &height, uint32_t &number)
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             if (!m_active || m_fullScreen)
                 return false;
             advanceLocked();
-            if (m_current.empty() || (m_width % 16u) != 0u || (m_height % 16u) != 0u ||
-                static_cast<uint64_t>(m_width) * m_height * 4u > capacity)
+            const uint32_t outHeight = alphaMovie ? m_height / 2u : m_height;
+            if (m_current.empty() || (m_width % 16u) != 0u || (outHeight % 16u) != 0u ||
+                static_cast<uint64_t>(m_width) * outHeight * 4u > capacity)
                 return false;
             width = m_width;
-            height = m_height;
+            height = outHeight;
             number = m_number;
             if (m_written == m_number)
                 return true;
             m_written = m_number;
             uint8_t *dst = out;
             for (uint32_t mbx = 0; mbx < m_width / 16u; ++mbx)
-                for (uint32_t y = 0; y < m_height; ++y, dst += 64)
+                for (uint32_t y = 0; y < outHeight; ++y, dst += 64)
                 {
                     const uint8_t *src = m_current.data() + (static_cast<size_t>(y) * m_width + mbx * 16u) * 4u;
+                    const uint8_t *mask = src + static_cast<size_t>(outHeight) * m_width * 4u;
                     for (uint32_t x = 0; x < 16u; ++x)
                     {
                         std::memcpy(dst + x * 4u, src + x * 4u, 3);
-                        dst[x * 4u + 3u] = 0x80u;
+                        const uint32_t luma = (mask[x * 4u] * 77u + mask[x * 4u + 1u] * 150u + mask[x * 4u + 2u] * 29u) >> 8;
+                        dst[x * 4u + 3u] = alphaMovie ? static_cast<uint8_t>((luma * 0x80u + 127u) / 255u) : 0x80u;
                     }
                 }
             return true;
@@ -465,6 +469,8 @@ namespace
     constexpr uint32_t kMwPlyRelCurFrm = 0x003ABF50u;
     constexpr uint32_t kMwPlyIsNextFrmReady = 0x003AC008u;
     constexpr uint32_t kMwPlyStop = 0x003AD870u;
+    constexpr uint32_t kMwPlyCompoMode = 0x08u;
+    constexpr uint32_t kMwPlyCompoAlpha = 3u;
     constexpr uint32_t kMwPlyWork = 0x20u;
     constexpr uint32_t kMwPlySfdHandle = 0x3Cu;
     constexpr uint32_t kFrameObjectSize = 0x90u;
@@ -487,8 +493,19 @@ namespace
         const uint32_t capacity = limit > buffer ? limit - buffer : 0u;
         uint32_t width = 0, height = 0, number = 0;
         std::memset(rdram + frame, 0, kFrameObjectSize);
-        if (capacity != 0u && player->currentMacroblocks(rdram + (buffer & PS2_RAM_MASK), capacity, width, height, number))
+        const bool alphaMovie = memory.read32(handle + kMwPlyCompoMode) == kMwPlyCompoAlpha;
+        if (static std::map<uint32_t, int> traced; std::getenv("PS2X_SC3_TRACE_MOVIE") && traced[handle] < 3)
         {
+            ++traced[handle];
+            std::cerr << "[sc3] mwPlyGetCurFrm handle=0x" << std::hex << handle << " buffer=0x" << buffer << " limit=0x" << limit
+                      << " ra=0x" << getRegU32(ctx, 31) << std::dec << " alpha=" << alphaMovie << " active=" << player->active() << std::endl;
+        }
+        if (capacity != 0u && player->currentMacroblocks(rdram + (buffer & PS2_RAM_MASK), capacity, alphaMovie, width, height, number))
+        {
+            if (std::getenv("PS2X_SC3_TRACE_MOVIE") && number % 60u == 1u)
+                std::cerr << "[sc3] movie frame handle=0x" << std::hex << handle << " buffer=0x" << buffer << std::dec << " " << width
+                          << "x" << height << " alpha=" << alphaMovie << " number=" << number << " ra=0x" << std::hex
+                          << getRegU32(ctx, 31) << std::dec << std::endl;
             const uint32_t fields[][2] = {{0x00u, buffer}, {0x04u, number}, {0x0Cu, width}, {0x10u, height}, {0x14u, width}, {0x18u, height}, {0x24u, number}};
             for (const auto &field : fields)
                 std::memcpy(rdram + frame + field[0], &field[1], 4);
