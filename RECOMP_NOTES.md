@@ -69,7 +69,8 @@ Open:
   (`patches/async_vif1_wip.patch`) is stable but does not help for that reason. A VU1 block compiler is the next
   real gain. `PS2X_GS_ASYNC_RASTER=1` helps.
 - Ghosting: the game blends each frame 70/30 with the previous one, which shows at low frame rates.
-- Menu texture movies: first implementation, being verified.
+- Menu preview movies (alpha movies, MOVIE.AFS files 8 and 9) start on the host but the menu has not asked for
+  their frames yet; the trigger is still unknown.
 
 Pitfall: recompiled functions return early at scheduler checkpoints (ctx->pc mid-body), so trace wrappers around
 guest functions must only read state on entry, never v0 after the call.

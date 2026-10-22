@@ -13,4 +13,5 @@ This repository holds the project around the recompiler, not the game:
 
 It contains no game data: no ISO, no extracted files, no recompiled game code. You need your own copy of the game.
 
-The runtime changes made for this game are on the PS2Recomp branch `sc3/bringup`.
+The runtime changes made for this game are in the PS2Recomp fork
+[Arzaroth/PS2Recomp](https://github.com/Arzaroth/PS2Recomp), branch `sc3/bringup`.
