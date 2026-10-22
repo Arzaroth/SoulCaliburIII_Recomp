@@ -64,10 +64,18 @@ Works: boot, opening and intro movies (skippable with Start), title, menus, char
 text, fights (attacks, KO, results) with music and voices.
 
 Open:
-- Speed: battles run at about 30% of full speed. Frame time is EE work (~21 ms) plus VU1 microprograms (~29 ms,
-  interpreted, cycle-accurate), serialized because the game waits for VU1. An asynchronous VIF1 worker
-  (`patches/async_vif1_wip.patch`) is stable but does not help for that reason. A VU1 block compiler is the next
-  real gain. `PS2X_GS_ASYNC_RASTER=1` helps.
+- Speed: the game paces itself at 30 fps (main loop waits two fields). Title, menus and most stages run near
+  that; Zasalamel's Chamber of Time (a dark stage full of floating debris and effects) runs at ~10-13 fps.
+  - With drawing disabled it still runs ~12 fps, so the GS is not the limit there: EE game code and VU1
+    microprograms are, serialized because the GS IRQ handler restarts the GIF chain (0x10ce98 reads D2_CHCR),
+    and PATH3 has to follow the VIF1 work already queued.
+  - VU1 interpreter: ~35 -> ~25 ns per VU cycle (dead MAC/status flags skipped, FMAC ops specialized,
+    lazy PATH1 copy); `PS2X_VU1_EXACT_FLAGS=1` keeps every flag.
+  - `patches/async_vif1_wip.patch`: VIF1/VU1 on a worker thread, stable, no gain because of the serialization
+    above. `patches/async_vif1_path3_wip.patch` adds a shared GIF arbiter and hands EE PATH3 packets to the
+    worker in order instead of waiting: the EE no longer waits, but no measurable gain yet and a stall with
+    garbled overlay text in the demo.
+  - A real gain needs a VU1 block compiler and less EE-side overhead.
 - Ghosting: the game blends each frame 70/30 with the previous one, which shows at low frame rates.
 - Menu preview movies (alpha movies, MOVIE.AFS files 8 and 9) start on the host but the menu has not asked for
   their frames yet; the trigger is still unknown.
