@@ -1,6 +1,7 @@
 #include "game_overrides.h"
 #include "ps2_runtime.h"
 #include "ps2_recompiled_functions.h"
+#include "runtime/ee_scheduler.h"
 
 #include <algorithm>
 #include <atomic>
@@ -868,6 +869,196 @@ namespace
         }
     }
 
+    // PS2X_SC3_RATE=<addr,...>: calls of each function per 60 emulated VSyncs, printed every 300.
+    struct RateTrace
+    {
+        std::map<uint32_t, PS2Runtime::RecompiledFunction> originals;
+        std::map<uint32_t, uint64_t> counts;
+        uint64_t windowStart = 0;
+    };
+
+    RateTrace &rateTrace()
+    {
+        static RateTrace trace;
+        return trace;
+    }
+
+    void rateTraced(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        RateTrace &trace = rateTrace();
+        const uint32_t address = ctx->pc;
+        ++trace.counts[address];
+        const uint64_t tick = runtime->eeScheduler().currentVSyncTick();
+        if (tick >= trace.windowStart + 300u)
+        {
+            std::cerr << "[sc3] rate vsync=" << tick;
+            for (auto &[function, count] : trace.counts)
+            {
+                std::cerr << " 0x" << std::hex << function << std::dec << "=" << (count * 60.0 / static_cast<double>(tick - trace.windowStart));
+                count = 0;
+            }
+            std::cerr << std::endl;
+            trace.windowStart = tick;
+        }
+        trace.originals[address](rdram, ctx, runtime);
+    }
+
+    void installRateTrace(PS2Runtime &runtime, const char *spec)
+    {
+        std::string text(spec);
+        for (size_t start = 0; start < text.size();)
+        {
+            size_t end = text.find(',', start);
+            if (end == std::string::npos)
+                end = text.size();
+            const uint32_t address = static_cast<uint32_t>(std::strtoul(text.substr(start, end - start).c_str(), nullptr, 0));
+            if (auto original = runtime.lookupFunction(address))
+            {
+                rateTrace().originals[address] = original;
+                runtime.registerFunction(address, rateTraced);
+            }
+            start = end + 1;
+        }
+    }
+
+    // PS2X_SC3_RATE=<addr,...>: calls of each function per 60 emulated VSyncs, printed every 300.
+    struct RateTrace
+    {
+        std::map<uint32_t, PS2Runtime::RecompiledFunction> originals;
+        std::map<uint32_t, uint64_t> counts;
+        uint64_t windowStart = 0;
+    };
+
+    RateTrace &rateTrace()
+    {
+        static RateTrace trace;
+        return trace;
+    }
+
+    void rateTraced(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        RateTrace &trace = rateTrace();
+        const uint32_t address = ctx->pc;
+        ++trace.counts[address];
+        const uint64_t tick = runtime->eeScheduler().currentVSyncTick();
+        if (tick >= trace.windowStart + 300u)
+        {
+            std::cerr << "[sc3] rate vsync=" << tick;
+            for (auto &[function, count] : trace.counts)
+            {
+                std::cerr << " 0x" << std::hex << function << std::dec << "=" << (count * 60.0 / static_cast<double>(tick - trace.windowStart));
+                count = 0;
+            }
+            std::cerr << std::endl;
+            trace.windowStart = tick;
+        }
+        trace.originals[address](rdram, ctx, runtime);
+    }
+
+    void installRateTrace(PS2Runtime &runtime, const char *spec)
+    {
+        std::string text(spec);
+        for (size_t start = 0; start < text.size();)
+        {
+            size_t end = text.find(',', start);
+            if (end == std::string::npos)
+                end = text.size();
+            const uint32_t address = static_cast<uint32_t>(std::strtoul(text.substr(start, end - start).c_str(), nullptr, 0));
+            if (auto original = runtime.lookupFunction(address))
+            {
+                rateTrace().originals[address] = original;
+                runtime.registerFunction(address, rateTraced);
+            }
+            start = end + 1;
+        }
+    }
+
+    // PS2X_SC3_TRACE_GSWAIT=1: GS/VIF1 status seen by the wait-for-GS-idle loop (0x127778).
+    constexpr uint32_t kGsIdleWait = 0x00127778u;
+    PS2Runtime::RecompiledFunction g_gsIdleWait = nullptr;
+
+    void gsIdleWaitTraced(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        static uint32_t calls = 0;
+        static uint64_t lastTick = 0;
+        const uint64_t tick = runtime->eeScheduler().currentVSyncTick();
+        if ((++calls % 64u) == 1u)
+        {
+            PS2Memory &memory = runtime->memory();
+            std::cerr << "[sc3] gs idle wait call#" << calls << " a0=" << getRegU32(ctx, 4) << " csr=0x" << std::hex
+                      << memory.read32(0x12001000u) << " vif1stat=0x" << memory.read32(0x10003C00u) << " gifstat=0x"
+                      << memory.read32(0x10003020u) << std::dec << " vsync=" << tick << " ra=0x" << std::hex
+                      << getRegU32(ctx, 31) << std::dec << std::endl;
+        }
+        lastTick = tick;
+        g_gsIdleWait(rdram, ctx, runtime);
+    }
+
+    // PS2X_SC3_TRACE_PACING=1: the frame limiter's Timer 3 wait (0x148098 called from 0x12e000-0x12f000).
+    constexpr uint32_t kElapsedLines = 0x00148098u;
+    PS2Runtime::RecompiledFunction g_elapsedLines = nullptr;
+
+    void elapsedLinesTraced(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        static uint32_t lastRa = 0;
+        static uint64_t lastTick = 0;
+        static uint32_t calls = 0;
+        const uint32_t ra = getRegU32(ctx, 31);
+        const uint64_t tick = runtime->eeScheduler().currentVSyncTick();
+        static const uint64_t everyFrom = []
+        {
+            const char *value = std::getenv("PS2X_SC3_TRACE_PACING_ALL");
+            return value ? std::strtoull(value, nullptr, 0) : ~0ull;
+        }();
+        if (tick >= everyFrom && tick < everyFrom + 7u)
+        {
+            PS2Memory &memory = runtime->memory();
+            const uint32_t timing = memory.read32(0x469234u);
+            std::cerr << "[sc3] pace ra=0x" << std::hex << ra << std::dec << " v=" << tick << " t3=" << (memory.read32(0x10001800u) & 0xFFFFu)
+                      << " base=" << memory.read16(timing + 0x100u) << " snap=" << memory.read16(timing + 0x102u)
+                      << " abd=" << int(static_cast<int8_t>(memory.read8(0x46e5cdu))) << std::endl;
+        }
+        if (ra != lastRa || tick != lastTick)
+        {
+            PS2Memory &memory = runtime->memory();
+            const uint32_t timing = memory.read32(0x469234u);
+            const uint32_t sp = getRegU32(ctx, 29);
+            static const uint64_t fullFrom = []
+            {
+                const char *value = std::getenv("PS2X_SC3_TRACE_PACING_FULL");
+                return value ? std::strtoull(value, nullptr, 0) : ~0ull;
+            }();
+            if ((++calls % 8u) == 1u || ra != lastRa || (tick >= fullFrom && tick < fullFrom + 20u))
+                std::cerr << "[sc3] pacing ra=0x" << std::hex << ra << std::dec << " vsync=" << tick
+                          << " t3=" << (memory.read32(0x10001800u) & 0xFFFFu) << " base=" << memory.read16(timing + 0x100u)
+                          << " snap=" << memory.read16(timing + 0x102u) << " target=" << static_cast<int32_t>(memory.read32(sp + 0x30u))
+                          << " x4c=" << static_cast<int32_t>(memory.read32(timing + 0x4cu)) << std::endl;
+            lastRa = ra;
+            lastTick = tick;
+        }
+        g_elapsedLines(rdram, ctx, runtime);
+    }
+
+    // PS2X_SC3_TRACE_GSIRQ=1: what the GS interrupt handler (0x10e658) sees on entry.
+    constexpr uint32_t kGsIrqHandler = 0x0010E658u;
+    PS2Runtime::RecompiledFunction g_gsIrqHandler = nullptr;
+
+    void gsIrqHandlerTraced(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        static uint32_t calls = 0;
+        static const uint32_t first = static_cast<uint32_t>(std::atoi(std::getenv("PS2X_SC3_TRACE_GSIRQ")));
+        if (++calls >= first && calls < first + 120u)
+        {
+            PS2Memory &memory = runtime->memory();
+            std::cerr << "[sc3] gsirq#" << calls << " vsync=" << runtime->eeScheduler().currentVSyncTick() << std::hex
+                      << " csr=0x" << memory.read32(0x12001000u) << " sig=0x" << memory.read32(0x12001080u)
+                      << " prev=0x" << memory.read32(0x467494u) << " h82=0x" << memory.read16(0x5be782u)
+                      << " acd=" << unsigned(memory.read8(0x46e5ddu)) << " abe=" << unsigned(memory.read8(0x46e5ceu))
+                      << std::dec << std::endl;
+        }
+        g_gsIrqHandler(rdram, ctx, runtime);
+    }
+
     void installObjectTrace(PS2Runtime &runtime, const char *spec)
     {
         ObjectTrace &trace = objectTrace();
@@ -914,6 +1105,20 @@ namespace
     {
         if (const char *spec = std::getenv("PS2X_SC3_TRACE_ENTRY"); spec && *spec)
             installEntryTrace(runtime, spec);
+        if (const char *trace = std::getenv("PS2X_SC3_TRACE_PACING"); trace && *trace)
+        {
+            g_elapsedLines = runtime.lookupFunction(kElapsedLines);
+            if (g_elapsedLines)
+                runtime.registerFunction(kElapsedLines, elapsedLinesTraced);
+        }
+        if (const char *trace = std::getenv("PS2X_SC3_TRACE_GSIRQ"); trace && *trace)
+        {
+            g_gsIrqHandler = runtime.lookupFunction(kGsIrqHandler);
+            if (g_gsIrqHandler)
+                runtime.registerFunction(kGsIrqHandler, gsIrqHandlerTraced);
+        }
+        if (const char *spec = std::getenv("PS2X_SC3_RATE"); spec && *spec)
+            installRateTrace(runtime, spec);
         if (const char *spec = std::getenv("PS2X_SC3_TRACE_OBJ"); spec && *spec)
             installObjectTrace(runtime, spec);
         if (const char *experiment = std::getenv("PS2X_SC3_FORCE_TEXT"); experiment && *experiment)
