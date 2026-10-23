@@ -941,7 +941,7 @@ namespace
         {
             PS2Memory &memory = runtime->memory();
             const uint32_t timing = memory.read32(0x469234u);
-            std::cerr << "[sc3] pace ra=0x" << std::hex << ra << std::dec << " v=" << tick << " t3=" << (memory.read32(0x10001800u) & 0xFFFFu)
+            std::cerr << "[sc3] pace ra=0x" << std::hex << ra << std::dec << " v=" << tick << " cycle=" << runtime->eeScheduler().currentCycle() << " t3=" << (memory.read32(0x10001800u) & 0xFFFFu)
                       << " base=" << memory.read16(timing + 0x100u) << " snap=" << memory.read16(timing + 0x102u)
                       << " abd=" << int(static_cast<int8_t>(memory.read8(0x46e5cdu))) << std::endl;
         }
@@ -974,10 +974,18 @@ namespace
     {
         static uint32_t calls = 0;
         static const uint32_t first = static_cast<uint32_t>(std::atoi(std::getenv("PS2X_SC3_TRACE_GSIRQ")));
-        if (++calls >= first && calls < first + 120u)
+        // PS2X_SC3_TRACE_GSIRQ_VSYNC=<tick>: also every interrupt during 7 VSyncs from that tick.
+        static const uint64_t fromTick = []
+        {
+            const char *value = std::getenv("PS2X_SC3_TRACE_GSIRQ_VSYNC");
+            return value ? std::strtoull(value, nullptr, 0) : ~0ull;
+        }();
+        const uint64_t tick = runtime->eeScheduler().currentVSyncTick();
+        if ((++calls >= first && calls < first + 120u) || (tick >= fromTick && tick < fromTick + 7u))
         {
             PS2Memory &memory = runtime->memory();
-            std::cerr << "[sc3] gsirq#" << calls << " vsync=" << runtime->eeScheduler().currentVSyncTick() << std::hex
+            std::cerr << "[sc3] gsirq#" << calls << " vsync=" << runtime->eeScheduler().currentVSyncTick()
+                      << " cycle=" << runtime->eeScheduler().currentCycle() << std::hex
                       << " csr=0x" << memory.read32(0x12001000u) << " sig=0x" << memory.read32(0x12001080u)
                       << " prev=0x" << memory.read32(0x467494u) << " h82=0x" << memory.read16(0x5be782u)
                       << " acd=" << unsigned(memory.read8(0x46e5ddu)) << " abe=" << unsigned(memory.read8(0x46e5ceu))
