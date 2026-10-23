@@ -66,19 +66,25 @@ Analyzer output plus:
 Works: boot, opening and intro movies (skippable with Start), title, menus, character select, Tales of Souls story
 text, fights (attacks, KO, results) with music and voices.
 
+Speed: the game paces itself at 30 fps (main loop waits two fields) and now holds it in the attract loop,
+including Zasalamel's Chamber of Time (3-loop benchmark: 29.9 fps there, 30.2 in the second demo).
+  - GS SIGNAL/FINISH/LABEL latency follows the estimated GS drawing time since the previous event (scissored
+    primitive area + per-primitive cost, `GsDrawEstimate`). The old fixed 200000-cycle latency held Chamber of
+    Time to 20 fps: its frame chains ~16 SIGNAL handshakes, each paced in host time too. Title/loading
+    segments draw few large primitives and keep long latencies, which their loader pacing needs (short fixed
+    latencies left the "NOW LOADING" overlay over the 2nd demo and froze the 3rd). Tunables:
+    `PS2X_GS_EVENT_LATENCY` (base), `PS2X_GS_PIXEL_CYCLES`, `PS2X_GS_PRIM_CYCLES`.
+  - VU1 microprograms compiled ahead of time (`scripts/compile_vu1.sh`, three images): one function per
+    straight-line segment with stall checks proven unnecessary dropped, ~7.6 ns per VU cycle (interpreter
+    ~23). `PS2X_VU1_EXACT_FLAGS=1` keeps every flag (and disables the compiled code).
+  - `patches/async_vif1_wip.patch` / `patches/async_vif1_path3_wip.patch`: VIF1/VU1 on a worker thread,
+    no longer needed for speed; kept for reference.
+
 Open:
-- Speed: the game paces itself at 30 fps (main loop waits two fields). Title, menus and most stages run near
-  that; Zasalamel's Chamber of Time (a dark stage full of floating debris and effects) runs at ~21 fps.
-  - VU1 microprograms compiled ahead of time (`scripts/compile_vu1.sh`, three images) take that stage from
-    ~10-13 to ~21 fps. VU1 interpreter alone: ~35 -> ~23 ns per VU cycle (dead MAC/status flags skipped, FMAC
-    ops specialized, lazy PATH1 copy); compiled: ~12.5 ns. `PS2X_VU1_EXACT_FLAGS=1` keeps every flag (and
-    disables the compiled code).
-  - `patches/async_vif1_wip.patch`: VIF1/VU1 on a worker thread, stable, no gain because of the serialization
-    above. `patches/async_vif1_path3_wip.patch` adds a shared GIF arbiter and hands EE PATH3 packets to the
-    worker in order instead of waiting: the EE no longer waits, but no measurable gain yet and a stall with
-    garbled overlay text in the demo.
-  - What remains there: VU1 work still serializes with the EE game code, and GS CLUT-load drains.
+- The third attract demo (Tira vs Taki, stage over water) runs ~24 fps.
 - Ghosting: the game blends each frame 70/30 with the previous one, which shows at low frame rates.
+
+Notes:
 - Menu preview movies work: Mode Select creates and immediately stops its preview tasks (state 4, by
   design); the Single Player / VS submenus start them as the cursor moves (MOVIE.AFS files 10, 11, ...,
   128x96 and 256x192 alpha movies through mwPlyGetCurFrm).
