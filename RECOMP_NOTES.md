@@ -65,6 +65,9 @@ Analyzer output plus:
 
 Works: boot, opening and intro movies (skippable with Start), title, menus, character select, Tales of Souls story
 text, fights (attacks, KO, results) with music and voices.
+Memory card (mc0/ next to the ELF): Options > SAVE & LOAD > SAVE DATA creates BASLUS-21216SC3/ (icon.sys,
+normal.ico, 273408-byte save) and LOAD DATA reads it back ("Load complete!"). On an empty card the "No data
+found" dialog creates data with Square (the pink icon; the dialog's button table maps only Square and Start).
 
 Speed: the game paces itself at 30 fps (main loop waits two fields) and now holds it in the attract loop,
 including Zasalamel's Chamber of Time (3-loop benchmark: 29.9 fps there, 30.2 in the second demo).
