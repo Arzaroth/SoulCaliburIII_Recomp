@@ -13,10 +13,13 @@
 2. Copy `output/*.cpp` into `ps2xRuntime/src/runner/` and the generated headers into `ps2xRuntime/include/`
    (do not commit them; `register_functions.cpp` is tracked upstream as a stub).
 3. Copy `runtime/sc3_overrides.cpp` into `ps2xRuntime/src/runner/`.
-4. Build (Linux, clang, no system cmake/ninja here so through mise):
+4. VU1 microprograms: run once with `PS2X_VU1_DUMP_CODE=<dir>` (writes each VU1 code image the runtime has
+   no compiled code for), then `scripts/compile_vu1.sh <dir>` generates `src/runner/vu1_sc3.cpp`
+   (`ps2_vu1_compile`, do not commit it). Without it the interpreter runs them, about twice slower.
+5. Build (Linux, clang, no system cmake/ninja here so through mise):
    `cmake -S . -B out/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-msse4.2`
    `ninja -C out/build ps2EntryRunner`
-5. Run: `ps2EntryRunner <disc>/SLUS_212.16`, or `scripts/sc3run.sh <name> <seconds> [ENV=value...]` which logs,
+6. Run: `ps2EntryRunner <disc>/SLUS_212.16`, or `scripts/sc3run.sh <name> <seconds> [ENV=value...]` which logs,
    screenshots (Hyprland + grim) and stops the game after a while.
 
 ## sc3.toml
@@ -66,11 +69,10 @@ text, fights (attacks, KO, results) with music and voices.
 Open:
 - Speed: the game paces itself at 30 fps (main loop waits two fields). Title, menus and most stages run near
   that; Zasalamel's Chamber of Time (a dark stage full of floating debris and effects) runs at ~10-13 fps.
-  - With drawing disabled it still runs ~12 fps, so the GS is not the limit there: EE game code and VU1
-    microprograms are, serialized because the GS IRQ handler restarts the GIF chain (0x10ce98 reads D2_CHCR),
-    and PATH3 has to follow the VIF1 work already queued.
-  - VU1 interpreter: ~35 -> ~25 ns per VU cycle (dead MAC/status flags skipped, FMAC ops specialized,
-    lazy PATH1 copy); `PS2X_VU1_EXACT_FLAGS=1` keeps every flag.
+  - VU1 microprograms compiled ahead of time (`scripts/compile_vu1.sh`, three images) take that stage from
+    ~10-13 to ~21 fps. VU1 interpreter alone: ~35 -> ~23 ns per VU cycle (dead MAC/status flags skipped, FMAC
+    ops specialized, lazy PATH1 copy); compiled: ~12.5 ns. `PS2X_VU1_EXACT_FLAGS=1` keeps every flag (and
+    disables the compiled code).
   - `patches/async_vif1_wip.patch`: VIF1/VU1 on a worker thread, stable, no gain because of the serialization
     above. `patches/async_vif1_path3_wip.patch` adds a shared GIF arbiter and hands EE PATH3 packets to the
     worker in order instead of waiting: the EE no longer waits, but no measurable gain yet and a stall with
