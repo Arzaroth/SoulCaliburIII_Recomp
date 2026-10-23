@@ -68,7 +68,7 @@ text, fights (attacks, KO, results) with music and voices.
 
 Open:
 - Speed: the game paces itself at 30 fps (main loop waits two fields). Title, menus and most stages run near
-  that; Zasalamel's Chamber of Time (a dark stage full of floating debris and effects) runs at ~10-13 fps.
+  that; Zasalamel's Chamber of Time (a dark stage full of floating debris and effects) runs at ~21 fps.
   - VU1 microprograms compiled ahead of time (`scripts/compile_vu1.sh`, three images) take that stage from
     ~10-13 to ~21 fps. VU1 interpreter alone: ~35 -> ~23 ns per VU cycle (dead MAC/status flags skipped, FMAC
     ops specialized, lazy PATH1 copy); compiled: ~12.5 ns. `PS2X_VU1_EXACT_FLAGS=1` keeps every flag (and
@@ -77,7 +77,7 @@ Open:
     above. `patches/async_vif1_path3_wip.patch` adds a shared GIF arbiter and hands EE PATH3 packets to the
     worker in order instead of waiting: the EE no longer waits, but no measurable gain yet and a stall with
     garbled overlay text in the demo.
-  - A real gain needs a VU1 block compiler and less EE-side overhead.
+  - What remains there: VU1 work still serializes with the EE game code, and GS CLUT-load drains.
 - Ghosting: the game blends each frame 70/30 with the previous one, which shows at low frame rates.
 - Menu preview movies (alpha movies, MOVIE.AFS files 8 and 9) start on the host but the menu has not asked for
   their frames yet; the trigger is still unknown.
