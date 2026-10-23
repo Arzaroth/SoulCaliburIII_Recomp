@@ -937,7 +937,12 @@ namespace
             const char *value = std::getenv("PS2X_SC3_TRACE_PACING_ALL");
             return value ? std::strtoull(value, nullptr, 0) : ~0ull;
         }();
-        if (tick >= everyFrom && tick < everyFrom + 7u)
+        static const uint64_t span = []
+        {
+            const char *value = std::getenv("PS2X_SC3_TRACE_PACING_SPAN");
+            return value ? std::strtoull(value, nullptr, 0) : 7ull;
+        }();
+        if (tick >= everyFrom && tick < everyFrom + span)
         {
             PS2Memory &memory = runtime->memory();
             const uint32_t timing = memory.read32(0x469234u);
@@ -974,14 +979,19 @@ namespace
     {
         static uint32_t calls = 0;
         static const uint32_t first = static_cast<uint32_t>(std::atoi(std::getenv("PS2X_SC3_TRACE_GSIRQ")));
-        // PS2X_SC3_TRACE_GSIRQ_VSYNC=<tick>: also every interrupt during 7 VSyncs from that tick.
+        // PS2X_SC3_TRACE_GSIRQ_VSYNC=<tick>: also every interrupt during PS2X_SC3_TRACE_GSIRQ_SPAN (7) VSyncs from that tick.
         static const uint64_t fromTick = []
         {
             const char *value = std::getenv("PS2X_SC3_TRACE_GSIRQ_VSYNC");
             return value ? std::strtoull(value, nullptr, 0) : ~0ull;
         }();
         const uint64_t tick = runtime->eeScheduler().currentVSyncTick();
-        if ((++calls >= first && calls < first + 120u) || (tick >= fromTick && tick < fromTick + 7u))
+        static const uint64_t span = []
+        {
+            const char *value = std::getenv("PS2X_SC3_TRACE_GSIRQ_SPAN");
+            return value ? std::strtoull(value, nullptr, 0) : 7ull;
+        }();
+        if ((++calls >= first && calls < first + 120u) || (tick >= fromTick && tick < fromTick + span))
         {
             PS2Memory &memory = runtime->memory();
             std::cerr << "[sc3] gsirq#" << calls << " vsync=" << runtime->eeScheduler().currentVSyncTick()
