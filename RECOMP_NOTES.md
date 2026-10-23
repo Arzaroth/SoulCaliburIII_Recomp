@@ -89,5 +89,9 @@ Notes:
   design); the Single Player / VS submenus start them as the cursor moves (MOVIE.AFS files 10, 11, ...,
   128x96 and 256x192 alpha movies through mwPlyGetCurFrm).
 
+Regenerate with a recompiler that has the SQRT.S fix (PS2Recomp aeaaa48, from boubou666's 58b5c8b): the EE takes
+SQRT.S's operand from ft, and the old code took sqrt($f0) instead, which broke 56 sites in 41 functions, among them the
+game's vec3 length (0x103000), 2D length (0x103040) and point distance (0x103058).
+
 Pitfall: recompiled functions return early at scheduler checkpoints (ctx->pc mid-body), so trace wrappers around
 guest functions must only read state on entry, never v0 after the call.
