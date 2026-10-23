@@ -81,7 +81,12 @@ including Zasalamel's Chamber of Time (3-loop benchmark: 29.9 fps there, 30.2 in
     no longer needed for speed; kept for reference.
 
 Open:
-- The third attract demo (Tira vs Taki, stage over water) runs ~24 fps.
+- Some fights are bound by the host software GS (GS thread ~96%, raster workers ~87%): a player Free Training
+  fight runs ~19 fps, some random attract stages 21-28 fps. Menus run 13-15 fps.
+- Entering a fight (Free Training, Tales of Souls) hung on a black screen with a packet linked into two
+  ordering-table buckets (the walk at 0x10E4B8 loops). It no longer reproduces (9 of 9 runs) since CSR.FIFO
+  reports the GS busy until its estimated drawing is done and CD reads take drive time, but the exact
+  cause of the double link was not found, so it may come back with other timings.
 - Ghosting: the game blends each frame 70/30 with the previous one, which shows at low frame rates.
 
 Notes:
