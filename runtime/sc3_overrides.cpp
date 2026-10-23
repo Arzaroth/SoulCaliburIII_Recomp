@@ -842,7 +842,7 @@ namespace
         uint32_t slot = 0;
         std::memcpy(&slot, rdram + ((sp + 0x88) & PS2_RAM_MASK), 4);
         std::cerr << "[sc3] entry pc=0x" << std::hex << ctx->pc << " sp=0x" << sp << " ra=0x" << getRegU32(ctx, 31)
-                  << " a0=0x" << getRegU32(ctx, 4) << " a1=0x" << getRegU32(ctx, 5) << " a2=0x" << getRegU32(ctx, 6) << " a3=0x" << getRegU32(ctx, 7) << " sp88=0x" << slot << std::dec << " cycle=" << runtime->eeScheduler().currentCycle()
+                  << " a0=0x" << getRegU32(ctx, 4) << " a1=0x" << getRegU32(ctx, 5) << " a2=0x" << getRegU32(ctx, 6) << " a3=0x" << getRegU32(ctx, 7) << " sp88=0x" << slot << " sp2c=0x" << runtime->memory().read32(sp + 0x2cu) << " t0=0x" << runtime->memory().read32(0x10000000u) << std::dec << " cycle=" << runtime->eeScheduler().currentCycle()
                   << std::endl;
         auto &originals = entryTraceOriginals();
         auto it = originals.find(ctx->pc);
