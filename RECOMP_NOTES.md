@@ -79,8 +79,9 @@ Open:
     garbled overlay text in the demo.
   - What remains there: VU1 work still serializes with the EE game code, and GS CLUT-load drains.
 - Ghosting: the game blends each frame 70/30 with the previous one, which shows at low frame rates.
-- Menu preview movies (alpha movies, MOVIE.AFS files 8 and 9) start on the host but the menu has not asked for
-  their frames yet; the trigger is still unknown.
+- Menu preview movies work: Mode Select creates and immediately stops its preview tasks (state 4, by
+  design); the Single Player / VS submenus start them as the cursor moves (MOVIE.AFS files 10, 11, ...,
+  128x96 and 256x192 alpha movies through mwPlyGetCurFrm).
 
 Pitfall: recompiled functions return early at scheduler checkpoints (ctx->pc mid-body), so trace wrappers around
 guest functions must only read state on entry, never v0 after the call.
