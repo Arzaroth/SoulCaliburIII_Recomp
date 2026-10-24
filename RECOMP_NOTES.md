@@ -91,8 +91,8 @@ including Zasalamel's Chamber of Time (3-loop benchmark: 29.9 fps there, 30.2 in
 Open:
 - Fights are bound by the host software GS. On an 8-core 7800X3D with the default 6 raster workers (cores - 2),
   the attract demo runs 29-30.5 fps, Free Training 29.2-29.6, fights with hit effects 27-31. The rest is the
-  generic per-pixel write path. Workers occasionally diverge from serial drawing by a few hundred pixels in the
-  shadow pass of some frames (timing dependent, seen with 4 workers too; not found yet).
+  generic per-pixel write path. The workers' rare divergence in the shadow pass was a texture-row range capped at
+  the texture height under REGION_CLAMP (fixed in PS2Recomp 26574ece); recorded traces now replay identically.
 - Entering a fight (Free Training, Tales of Souls) hung on a black screen with a packet linked into two
   ordering-table buckets (the walk at 0x10E4B8 loops). It no longer reproduces (9 of 9 runs) since CSR.FIFO
   reports the GS busy until its estimated drawing is done and CD reads take drive time, but the exact
