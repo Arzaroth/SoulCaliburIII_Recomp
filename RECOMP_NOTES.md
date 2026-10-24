@@ -65,6 +65,10 @@ Analyzer output plus:
 
 Works: boot, opening and intro movies (skippable with Start), title, menus, character select, Tales of Souls story
 text, fights (attacks, KO, results) with music and voices.
+Full run: Tales of Souls played to the end with movies on (Siegfried, every episode, final boss Abyss, ending,
+results, then the save prompt) with PS2X_SC3_AUTOWIN=1 so scripted input wins each fight; no crash, no missing
+target, 30 fps outside fights. With PS2X_SC3_NO_MOVIES=1 the same run stopped on a white NOW LOADING screen after
+Nightmare: the movie skip, not the game, so the skip option is for testing only.
 Memory card (mc0/ next to the ELF): Options > SAVE & LOAD > SAVE DATA creates BASLUS-21216SC3/ (icon.sys,
 normal.ico, 273408-byte save) and LOAD DATA reads it back ("Load complete!"). On an empty card the "No data
 found" dialog creates data with Square (the pink icon; the dialog's button table maps only Square and Start).
