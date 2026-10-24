@@ -57,6 +57,10 @@ Analyzer output plus:
   CRI_ADXI never saw `spucore=2` and the game stopped core-0 output every frame (no ADX music).
 - VU1 interpreter: about 35% faster (cheaper FMAC flags, hazard checks, decode lookups, ACC/Q/I only when read).
 - Runtime hooks: presentation override and SPU2 mixer for host-decoded media.
+- CD drive timing: 30/100 ms seeks by distance and a CAV transfer rate (40% at the hub). The Art Gallery fades
+  in once its pictures are loaded while the Museum's 30-frame fade-out still runs; loads that ended too early
+  let the fade-out finish last and leave the gallery black. Brightness is the float at 0x4690D4.
+- vsprintf HLE: one 64-bit va_list slot per argument (button help showed "Confirm (null)").
 - Diagnostics: `PS2X_STATE_DUMP`, `PS2X_CALL_TRACE`, `PS2X_WATCH=addr[:n]`, `PS2X_PAD_SCRIPT="t:button,..."`,
   `PS2X_FRAME_DUMP=<dir>`, `PS2X_DEBUG_UI=0`, `PS2X_IOP_TRACE_PC`, `PS2X_IOP_COUNT_RANGE`, `PS2X_IOP_WATCH`,
   branch history in missing-target reports, VU1 record/replay (`PS2X_VU1_RECORD` + `ps2_vu1_replay`).
@@ -70,6 +74,10 @@ results, then the save prompt) with PS2X_SC3_AUTOWIN=1 so scripted input wins ea
 target, 30 fps outside fights. PS2X_SC3_NO_MOVIES=1 skips one-shot movies only: the loading screen before the last episodes waits for the frames
 of its looping movie (it stalled on a white NOW LOADING screen when those were skipped too). With it, Zasalamel's
 run also reaches Abyss, the ending, the unlocks and the save prompt.
+Modes reached with scripted input: VS (standard fight), Free Training, Shop, Options, World Competition
+(tournament round 1 fight), Soul Arena (stage 1 fight), Museum (Art Gallery menu, pictures and Hi-Res pages),
+and Chronicles of the Sword: character editor, story text, dialogue, briefing, sortie and the real-time field
+map with the command tutorial. In the editor's "Finish editing?" dialog, Left selects Yes.
 Memory card (mc0/ next to the ELF): Options > SAVE & LOAD > SAVE DATA creates BASLUS-21216SC3/ (icon.sys,
 normal.ico, 273408-byte save) and LOAD DATA reads it back ("Load complete!"). On an empty card the "No data
 found" dialog creates data with Square (the pink icon; the dialog's button table maps only Square and Start).
