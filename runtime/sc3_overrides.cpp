@@ -755,8 +755,10 @@ namespace
                   << std::endl;
         const uint32_t handle = getRegU32(ctx, 4);
         g_movies.stop(handle);
+        // PS2X_SC3_NO_MOVIES skips one-shot movies only: screens built on a looping movie (Tales of Souls' loading
+        // screen before the last episodes) wait for its frames.
         if ((ctx->pc == kMwPlyStartAfs || ctx->pc == kMwPlyStartAfsLp) && getRegU32(ctx, 5) == kMovieAfsPartition &&
-            !std::getenv("PS2X_SC3_NO_MOVIES"))
+            (ctx->pc == kMwPlyStartAfsLp || !std::getenv("PS2X_SC3_NO_MOVIES")))
         {
             const std::string path = (PS2Runtime::getIoPaths().cdRoot / "MOVIE.AFS").string();
             uint64_t offset = 0, size = 0;
