@@ -1004,6 +1004,7 @@ namespace
                       << " csr=0x" << memory.read32(0x12001000u) << " sig=0x" << memory.read32(0x12001080u)
                       << " prev=0x" << memory.read32(0x467494u) << " h82=0x" << memory.read16(0x5be782u)
                       << " acd=" << unsigned(memory.read8(0x46e5ddu)) << " abe=" << unsigned(memory.read8(0x46e5ceu))
+                      << std::hex << " vif1tadr=0x" << memory.read32(0x10009030u) << " giftadr=0x" << memory.read32(0x1000A030u)
                       << std::dec << std::endl;
         }
         g_gsIrqHandler(rdram, ctx, runtime);
