@@ -1046,8 +1046,39 @@ namespace
         g_textureFontUpdate(rdram, ctx, runtime);
     }
 
+    // Test harness (PS2X_SC3_AUTOWIN=1), for scripted runs through a whole mode: during a fight the player keeps
+    // full health and the opponent is left at 1, so the scripted input's next hit wins.
+    constexpr uint32_t kPlayerHealth = 0x004D36A0u;
+    constexpr uint32_t kOpponentHealth = 0x004D36A4u;
+    constexpr float kFullHealth = 240.0f;
+    PS2Runtime::RecompiledFunction g_autoWinIrq = nullptr;
+
+    void autoWinIrq(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        float player = 0.0f;
+        float opponent = 0.0f;
+        std::memcpy(&player, rdram + kPlayerHealth, sizeof(player));
+        std::memcpy(&opponent, rdram + kOpponentHealth, sizeof(opponent));
+        auto inFight = [](float health) { return health >= 0.5f && health <= kFullHealth; };
+        if (inFight(player) && inFight(opponent))
+        {
+            std::memcpy(rdram + kPlayerHealth, &kFullHealth, sizeof(kFullHealth));
+            if (opponent > 1.0f)
+            {
+                const float one = 1.0f;
+                std::memcpy(rdram + kOpponentHealth, &one, sizeof(one));
+            }
+        }
+        g_autoWinIrq(rdram, ctx, runtime);
+    }
+
     void applySoulcalibur3(PS2Runtime &runtime)
     {
+        if (std::getenv("PS2X_SC3_AUTOWIN"))
+        {
+            g_autoWinIrq = runtime.lookupFunction(kGsIrqHandler);
+            runtime.registerFunction(kGsIrqHandler, autoWinIrq);
+        }
         if (const char *spec = std::getenv("PS2X_SC3_TRACE_ENTRY"); spec && *spec)
             installEntryTrace(runtime, spec);
         if (const char *trace = std::getenv("PS2X_SC3_TRACE_PACING"); trace && *trace)
