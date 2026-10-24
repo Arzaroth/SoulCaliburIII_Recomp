@@ -664,18 +664,21 @@ namespace
     {
         static uint64_t lastKey = ~0ull;
         static uint32_t calls = 0;
-        uint32_t flag = 0, step = 0, level = 0, counter = 0;
+        uint32_t flag = 0, step = 0, level = 0, counter = 0, fadeInMode = 0, overlay = 0;
         std::memcpy(&flag, rdram + 0x4EECC0u, 4);
         std::memcpy(&step, rdram + 0x4EECC4u, 4);
         std::memcpy(&level, rdram + 0x4EE05Cu, 4);
         std::memcpy(&counter, rdram + 0x4EE044u, 4);
+        std::memcpy(&fadeInMode, rdram + 0x4EE038u, 4);
+        std::memcpy(&overlay, rdram + 0x4EE04Cu, 4);
         ++calls;
-        const uint64_t key = (static_cast<uint64_t>(flag) << 63) ^ (static_cast<uint64_t>(step) << 32) ^ level ^ (static_cast<uint64_t>(counter) << 20);
+        const uint64_t key = (static_cast<uint64_t>(flag) << 63) ^ (static_cast<uint64_t>(step) << 32) ^ level ^ (static_cast<uint64_t>(counter) << 20) ^
+                             (static_cast<uint64_t>(fadeInMode) << 56) ^ (static_cast<uint64_t>(overlay) << 8);
         if (key != lastKey)
         {
             lastKey = key;
             std::cerr << "[sc3] fade call#" << calls << std::hex << " flag=" << flag << " step=0x" << step << " level=0x" << level
-                      << " counter=" << std::dec << counter << " ra=0x" << std::hex << getRegU32(ctx, 31) << std::dec << std::endl;
+                      << " counter=" << std::dec << counter << " in=" << fadeInMode << std::hex << " overlay=0x" << overlay << " ra=0x" << std::hex << getRegU32(ctx, 31) << std::dec << std::endl;
         }
         sub_001A2960_0x1a2960(rdram, ctx, runtime);
     }
