@@ -1122,9 +1122,20 @@ namespace
             runtime.registerFunction(kMovieTaskUpdate, movieTaskUpdateTraced);
         runtime.registerFunction(kMoviePlayStat, moviePlayStatFinished);
         runtime.configureReservedMemory(kReservedBase, kReservedTop, kMainStackBottom);
-        // Skipping several fields at once makes the game take its late-frame paths, whose display lists
-        // break (menu and Chronicles freezes); one field at most still keeps up with the wall clock.
-        runtime.eeScheduler().setWallClockCatchUp(EeScheduler::WallClockCatchUp::OncePerField);
+        // SC3's audio follows emulated time: fast-forwarding it after a slow stretch runs the game (and its
+        // music) faster than real time, and skipping fields makes it take its late-frame paths, whose display
+        // lists break (menu and Chronicles freezes). Emulated time only ever slows down.
+        runtime.eeScheduler().setWallClockCatchUp(EeScheduler::WallClockCatchUp::Off);
+        // VIF1/VU1 on the worker thread, running ahead of the EE on its own clock: fights keep 60 fps in real
+        // time only with VU1 off the EE thread. PS2X_VIF1_THREAD=0 keeps them on the EE thread.
+        if (const char *threaded = std::getenv("PS2X_VIF1_THREAD"); !(threaded && threaded[0] == '0'))
+        {
+            runtime.memory().setVif1Threaded(true);
+            runtime.memory().setGsLag(true);
+        }
+        // 8 textured pixels per GS cycle, the GS's fill rate: at 4 the modelled drawing of a fight frame takes
+        // most of a field and the game drops to ~45 fps in emulated time.
+        runtime.gsForPresentation().setDrawRates({256u, 32u});
         // Each of the ~30 SIGNAL handshakes per frame would wait out the modelled GS interrupt latency in turn
         // (Free Training 22 -> 18 fps), and the game does not need the stall to draw correctly.
         runtime.memory().setSignalStallEnabled(false);
