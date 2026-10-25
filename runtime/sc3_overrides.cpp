@@ -1122,6 +1122,9 @@ namespace
             runtime.registerFunction(kMovieTaskUpdate, movieTaskUpdateTraced);
         runtime.registerFunction(kMoviePlayStat, moviePlayStatFinished);
         runtime.configureReservedMemory(kReservedBase, kReservedTop, kMainStackBottom);
+        // Skipping several fields at once makes the game take its late-frame paths, whose display lists
+        // break (menu and Chronicles freezes); one field at most still keeps up with the wall clock.
+        runtime.eeScheduler().setWallClockCatchUp(EeScheduler::WallClockCatchUp::OncePerField);
         runtime.registerFunction(kMwPlyGetStat, mwPlyGetStatPlayEnd);
         runtime.registerFunction(kMwPlyGetCurFrm, mwPlyGetCurFrmHost);
         runtime.registerFunction(kMwPlyRelCurFrm, mwPlyRelCurFrmHost);
