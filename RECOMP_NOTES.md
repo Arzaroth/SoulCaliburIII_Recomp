@@ -60,6 +60,16 @@ Analyzer output plus:
 - CD drive timing: 30/100 ms seeks by distance and a CAV transfer rate (40% at the hub). The Art Gallery fades
   in once its pictures are loaded while the Museum's 30-frame fade-out still runs; loads that ended too early
   let the fade-out finish last and leave the gallery black. Brightness is the float at 0x4690D4.
+- Recompiler: VU0 macro VCLIP had the clip flag bits in the wrong order and judged against w instead of |w|.
+  Stage 3 (outdoor courtyard of the first Chronicles battle, also the field map terrain) culls its zones with
+  VCLIP masks (0x1087B0, mask 0xAA8) and drew nothing but the clear colours.
+- Recompiler: no function starts in a branch delay slot. A full regeneration with this rule merges 14 former
+  split functions (0x200000, 0x1E00F0, 0x2D0060, 0x400030, ...) into their callers; delete their old .cpp files
+  from the runner when updating it.
+- IOP: no interrupt delivery or preemption while a thread has interrupts suspended (CpuSuspendIntr). CRI_ADXI's
+  DTX and PSM threads share chunk lists; a rare lost chunk left the BGM player in PREP after its next stop, which
+  froze Chronicles on the DECISIVE BATTLE banner.
+- GS: the DMA-level SIGNAL stall is turned off by the overrides (each handshake waits the modelled IRQ latency).
 - vsprintf HLE: one 64-bit va_list slot per argument (button help showed "Confirm (null)").
 - Diagnostics: `PS2X_STATE_DUMP`, `PS2X_CALL_TRACE`, `PS2X_WATCH=addr[:n]`, `PS2X_PAD_SCRIPT="t:button,..."`,
   `PS2X_FRAME_DUMP=<dir>`, `PS2X_DEBUG_UI=0`, `PS2X_IOP_TRACE_PC`, `PS2X_IOP_COUNT_RANGE`, `PS2X_IOP_WATCH`,
