@@ -1125,6 +1125,9 @@ namespace
         // Skipping several fields at once makes the game take its late-frame paths, whose display lists
         // break (menu and Chronicles freezes); one field at most still keeps up with the wall clock.
         runtime.eeScheduler().setWallClockCatchUp(EeScheduler::WallClockCatchUp::OncePerField);
+        // Each of the ~30 SIGNAL handshakes per frame would wait out the modelled GS interrupt latency in turn
+        // (Free Training 22 -> 18 fps), and the game does not need the stall to draw correctly.
+        runtime.memory().setSignalStallEnabled(false);
         runtime.registerFunction(kMwPlyGetStat, mwPlyGetStatPlayEnd);
         runtime.registerFunction(kMwPlyGetCurFrm, mwPlyGetCurFrmHost);
         runtime.registerFunction(kMwPlyRelCurFrm, mwPlyRelCurFrmHost);
