@@ -78,50 +78,47 @@ disc files ──► Ghidra (headless, EE) + ps2_analyzer + recomp/*_hints.txt �
 - `runtime/sc3_overrides.cpp` holds the game-specific bindings: reserved memory, a host Sofdec movie player and
   mixer, the renderer and timing choices, and diagnostic tracers.
 
-The runtime lives in the PS2Recomp fork [Arzaroth/PS2Recomp](https://github.com/Arzaroth/PS2Recomp), branch
-`sc3/bringup`, built on [boubou666/PS2Recomp](https://github.com/boubou666/PS2Recomp). Most fixes made for this port
-are generic and many were taken upstream, for example the IOP interrupt suspension that kept CRI ADX streams alive, the
-VU0 VCLIP flags and VU1 run-ahead on its own clock.
+The runtime is the `PS2Recomp/` git submodule: [boubou666/PS2Recomp](https://github.com/boubou666/PS2Recomp), branch
+`sc3/bringup`, the fork shared with the *Twisted Metal: Black*, *Valkyrie Profile 2: Silmeria*, *The Lord of the Rings:
+The Third Age* and *Drakengard* recompilations. The top-level `CMakeLists.txt` builds its runtime, swaps its
+placeholder function table for the generated one and links the generated code, `runtime/` and the compiled VU1
+microcode into `ps2EntryRunner`. Most fixes made for this port are generic and go to boubou666's `main`, for example
+the IOP interrupt suspension that kept CRI ADX streams alive, the VU0 VCLIP flags and VU1 run-ahead on its own clock.
 
 ## Requirements
 
 - Linux (developed on Arch)
-- CMake 3.21+, Ninja, Clang with C++20
+- CMake 3.21+, Ninja, Clang with C++20, rsync, and bsdtar (libarchive) to extract the disc
 - FFmpeg development libraries (`libavcodec`, `libavformat`, `libavutil`, `libswresample`, `libswscale`)
 - X11/Wayland and OpenGL development headers (raylib is fetched and built by the runtime)
 - A Vulkan driver for the GPU renderer (any recent NVIDIA, AMD or Intel driver)
 - Ghidra with the Emotion Engine extension, only to regenerate the function map
-- Your own copy of `SLUS-21216` (check the hash above), with its files extracted to a folder
+- Your own copy of `SLUS-21216` as a disc image (the extracted ELF is checked against the hash above)
 
 ## Build and run
 
-The build is manual for now: the generated code is copied into the runtime's runner and built with it.
-
 ```bash
-git clone https://github.com/Arzaroth/PS2Recomp.git -b sc3/bringup
-git clone https://github.com/Arzaroth/SoulCaliburIII_Recomp.git
-
-# 1. recompile: from recomp/, with SLUS_212.16 copied next to sc3.toml
-ps2_recomp sc3.toml                                   # -> recomp/output/
-
-# 2. copy the generated code and the game overrides into the runtime
-cp recomp/output/*.cpp                ../PS2Recomp/ps2xRuntime/src/runner/
-cp recomp/output/ps2_recompiled_*.h   ../PS2Recomp/ps2xRuntime/include/
-cp runtime/sc3_overrides.cpp          ../PS2Recomp/ps2xRuntime/src/runner/
-
-# 3. build
-cd ../PS2Recomp
-cmake -S . -B out/build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_CXX_COMPILER=clang++ -DPS2X_BUILD_STUDIO=OFF
-ninja -C out/build ps2EntryRunner
-
-# 4. run, with the extracted disc folder as cdrom0:
-out/build/ps2xRuntime/ps2EntryRunner /path/to/disc/SLUS_212.16
+git clone --recurse-submodules https://github.com/Arzaroth/SoulCaliburIII_Recomp.git
+cd SoulCaliburIII_Recomp
+scripts/extract_iso.sh "/path/to/Soulcalibur III (USA).iso"   # disc files -> game/
+scripts/build_tools.sh                                         # ps2_recomp, ps2_analyzer, ps2_vu1_compile -> build/tools
+scripts/recomp.sh                                              # game/SLUS_212.16 + recomp/sc3.toml -> generated/
+scripts/build_runtime.sh                                       # runtime + generated code -> build/game (RelWithDebInfo)
+PS2X_VU1_DUMP_CODE=game/vu1code scripts/run.sh                 # once: play into a fight, then quit
+scripts/compile_vu1.sh                                         # game/vu1code/*.bin -> generated/vu1/vu1_sc3.cpp
+scripts/build_runtime.sh                                       # rebuild with the compiled VU1 microcode
+scripts/run.sh                                                 # ps2EntryRunner game/SLUS_212.16
 ```
 
-VU1 microprograms run in an interpreter until they are compiled: run the game once with
-`PS2X_VU1_DUMP_CODE=<dir>`, then `scripts/compile_vu1.sh <dir>` writes `vu1_sc3.cpp` into the runner; rebuild. See
-[RECOMP_NOTES.md](RECOMP_NOTES.md) for the details. The generated code is about 13,000 C++ files and takes a while
-to build the first time.
+The extracted disc folder is the game's `cdrom0:`; the memory cards (`mc0/`, `mc1/`) are created next to the ELF in
+`game/`. Without the compiled microcode VU1 runs in the interpreter, which plays but is several times slower:
+the dump run writes every VU1 and VU0 code image the game uploads that has no compiled code yet (the port's own runs
+found four: three VU1, one VU0), and `scripts/compile_vu1.sh [dir]` turns them into C++.
+
+`JOBS=<n>` sets the build parallelism of every script (default: all cores). The generated code is about 12,900 C++
+files; a clean build of the tools and the game (recompile included) takes about 10 minutes with `JOBS=8` on a Ryzen 7
+7800X3D, most of it the runner. `scripts/build_runtime.sh Release` or `Debug` picks another build type, and `CXX`
+another compiler (Clang is used when it is installed).
 
 A controller is used when one is connected; otherwise the keyboard (US key positions):
 
@@ -172,11 +169,15 @@ A controller is used when one is connected; otherwise the keyboard (US key posit
 
 | Path | Contents |
 |---|---|
+| `PS2Recomp/` | The recompiler and runtime (git submodule, boubou666/PS2Recomp branch `sc3/bringup`) |
+| `CMakeLists.txt` | Builds the runtime with the generated code and the game overrides linked in |
 | `recomp/` | Recompiler config (`sc3.toml`), the Ghidra function map and the entry-point hint lists |
 | `runtime/` | Game override module (`sc3_overrides.cpp`) |
-| `scripts/` | VU1 compile, run, disassembly, IRX and profiling helpers |
+| `scripts/` | Build, recompile, VU1 compile and run scripts; disassembly, IRX and profiling helpers |
 | `patches/` | Experiments kept for reference |
-| `RECOMP_NOTES.md` | Bring-up notes |
+| `docs/screenshots/` | Pictures of the running port |
+| `RECOMP_NOTES.md` | How the port was brought up, the fixes and the debugging tools |
+| `game/`, `generated/`, `build/` | Created by the scripts, ignored by git: disc files and VU1 images, generated C++, builds |
 
 Everything derived from the game (disc files, generated code, VU1 images, builds, logs) stays outside this repository.
 Never commit or redistribute it.
@@ -184,6 +185,6 @@ Never commit or redistribute it.
 ## Credits
 
 - [PS2Recomp](https://github.com/ran-j/PS2Recomp) by ran-j and contributors (GPL), the recompiler and runtime this port is built on.
-- [boubou666/PS2Recomp](https://github.com/boubou666/PS2Recomp) and the *Twisted Metal: Black*, *Valkyrie Profile 2: Silmeria* and *Drakengard* recompilations developed on it; runtime fixes are shared both ways.
-- [paraLLEl-GS](https://github.com/Arntzen-Software/parallel-gs) by Hans-Kristian Arntzen (LGPL), the GPU renderer.
+- [boubou666/PS2Recomp](https://github.com/boubou666/PS2Recomp) and the *Twisted Metal: Black*, *Valkyrie Profile 2: Silmeria*, *The Lord of the Rings: The Third Age* and *Drakengard* recompilations developed on it; runtime fixes are shared both ways.
+- [paraLLEl-GS](https://github.com/Arntzen-Software/parallel-gs) by Arntzen Software (Hans-Kristian Arntzen, Runar Heyer), LGPL-3.0+, the GPU renderer; fetched at build time by the PS2Recomp runtime.
 - *Soulcalibur III* © Bandai Namco Entertainment, developed by Project Soul. This is an unofficial fan project, not affiliated with or endorsed by them.
