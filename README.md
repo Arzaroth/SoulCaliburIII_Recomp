@@ -10,7 +10,7 @@ Not an emulator: the game's own MIPS R5900 code, rebuilt as a native program on 
 ![Based on](https://img.shields.io/badge/based%20on-PS2Recomp-17a35b)
 ![Status](https://img.shields.io/badge/status-playable%2C%20in%20testing-e8a33c)
 
-<img src="docs/screenshots/fight.jpg" width="49%"> <img src="docs/screenshots/title.jpg" width="49%">
+<img src="docs/screenshots/fight.jpg" width="49%"> <img src="docs/screenshots/title_screen.jpg" width="49%">
 <img src="docs/screenshots/character_select.jpg" width="49%"> <img src="docs/screenshots/versus.jpg" width="49%">
 <img src="docs/screenshots/chronicles_field.jpg" width="49%"> <img src="docs/screenshots/stage_select.jpg" width="49%">
 
