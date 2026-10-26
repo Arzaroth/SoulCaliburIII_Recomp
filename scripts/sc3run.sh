@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # usage: sc3run.sh <name> <seconds> [extra env...]
+# Runs the game for that long with a state dump every 5 s, logs to $SC3_RUNS/<name>.log and screenshots the window.
 set -u
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 name=$1; secs=$2; shift 2
-runs=${SC3_RUNS:-$HOME/Games/PS2/SoulcaliburIII/runs}
-runner=${SC3_RUNNER:-$HOME/repos/PS2Recomp.worktrees/sc3/bringup/out/build/ps2xRuntime/ps2EntryRunner}
-elf=${SC3_ELF:-$HOME/Games/PS2/SoulcaliburIII/disc/SLUS_212.16}
+runs=${SC3_RUNS:-$root/build/runs}
+runner=${SC3_RUNNER:-$root/build/game/PS2Recomp/ps2xRuntime/ps2EntryRunner}
+elf=${SC3_ELF:-$root/game/SLUS_212.16}
 mkdir -p "$runs"; cd "$runs"
 env PS2X_DEBUG_UI=0 PS2X_STATE_DUMP=5 "$@" timeout $((secs + 15)) \
   "$runner" "$elf" > "$name.log" 2>&1 &
