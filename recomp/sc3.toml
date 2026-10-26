@@ -3,13 +3,13 @@
 
 [general]
 # Path to input ELF file
-input = "SLUS_212.16"
+input = "game/SLUS_212.16"
 
 # Path to Ghidra exported function map (optional CSV)
 ghidra_output = ""
 
 # Path to output directory
-output = "./output/"
+output = "generated/"
 
 # Single file output mode (recommended for large games)
 single_file_output = false
