@@ -116,7 +116,7 @@ files; a clean build of the tools and the game (recompile included) takes about 
 7800X3D, most of it the runner. `scripts/build_runtime.sh Release` or `Debug` picks another build type, and `CXX`
 another compiler (Clang is used when it is installed).
 
-`scripts/regress.sh build ~/sc3-regress` checks a build for regressions: it boots with movies off, goes through the
+`scripts/regress.sh build/game ~/sc3-regress` checks a build for regressions: it boots with movies off, goes through the
 menus into a Free Training fight, attacks for a minute, then writes a verdict to `summary.txt` (route reached, ok,
 hang or crash, GS frame rate, SPU2 underruns) with the last frame and the log.
 
