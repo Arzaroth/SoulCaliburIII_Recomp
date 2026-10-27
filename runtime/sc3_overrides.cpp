@@ -1133,9 +1133,6 @@ namespace
             runtime.memory().setVif1Threaded(true);
             runtime.memory().setGsLag(true);
         }
-        // 8 textured pixels per GS cycle, the GS's fill rate: at 4 the modelled drawing of a fight frame takes
-        // most of a field and the game drops to ~45 fps in emulated time.
-        runtime.gsForPresentation().setDrawRates({256u, 32u});
         // Each of the ~30 SIGNAL handshakes per frame would wait out the modelled GS interrupt latency in turn
         // (Free Training 22 -> 18 fps), and the game does not need the stall to draw correctly.
         runtime.memory().setSignalStallEnabled(false);
