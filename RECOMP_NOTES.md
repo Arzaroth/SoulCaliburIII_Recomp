@@ -23,9 +23,8 @@ matched from its embedded database), then grew by hand:
 - **`[mmio]` and `[jump_tables]`** are the analyzer's, kept as generated.
 
 The recompiler emits one C++ file per function (about 12,900 with the entry stubs) and `register_functions.cpp`,
-the address-to-function table. The VU1 and VU0 microprograms are compiled from the code images the game uploads
-at run time: a run with `PS2X_VU1_DUMP_CODE=<dir>` writes every code image without compiled code, and
-`ps2_vu1_compile` (`scripts/compile_vu1.sh`) turns them into C++ (`generated/vu1/vu1_sc3.cpp`).
+the address-to-function table. `ps2_vu_aot` then finds the VU1 and VU0 microprograms in the ELF itself and compiles
+them into `generated/vu1/` (`scripts/recomp.sh` runs both); no run of the game is needed for it.
 
 ## Game overrides (`runtime/sc3_overrides.cpp`)
 
@@ -111,8 +110,7 @@ a guest function may only read state on entry, never `$v0` after the call. Overr
 
 ## Runtime fixes found with this game
 
-All of them are generic. Most are on boubou666's `main`; the rest are the `sc3/bringup` commits on top of it
-(the submodule's pinned commit).
+All of them are generic and on boubou666's `main`, which the submodule follows; there is no SC3 branch any more.
 
 ### EE, kernel and libraries
 
@@ -120,7 +118,7 @@ All of them are generic. Most are on boubou666's `main`; the rest are the `sc3/b
   Timer3 (HBLANK) changes, reading Timer3 twice per iteration, and sets its frame budget from that. Reading an
   unchanged timer charged one tick, applied only at the next scheduler checkpoint, so each further poll before it
   added another: the game measured Timer0 at twice its rate, set a two-field budget and ran fights at 30 fps.
-  Busy-wait polls now owe a single tick until it is applied (f2fbb555).
+  Busy-wait polls now owe a single tick until it is applied (f7a61cdf).
 - Timer 3 counts HBLANKs from reset; thread priority 0 accepted; `ChangeThreadPriority` returns the old priority;
   `sceDmaRecvN`.
 - **vsprintf**: one 64-bit va_list slot per argument (button help showed "Confirm (null)"); a null format pointer
@@ -166,7 +164,7 @@ All of them are generic. Most are on boubou666's `main`; the rest are the `sc3/b
   now plus latency, so the EE slept about 0.9 s in every 5 s of a fight. Their host deadlines now sit on the vblank
   timeline, and GS interrupt checks use an absolute cycle.
 - **Wall-clock catch-up** can be bounded to once per field or turned off (`WallClockCatchUp`); with it off a late
-  vblank restarts the field timeline (1e1e4c9c), see the override above.
+  vblank restarts the field timeline (8f08ca89), see the override above.
 - **VU1 run-ahead**: the VIF1 worker on its own EE-cycle clock with the GS lag, GS events of worker packets at
   the worker's cycle, a GIF DMA queued under the GS lag completing its channel when PATH3 goes to the worker.
 - **REGION_REPEAT drains.** SC3 draws its fighters with 1024x1024 region-repeat textures masked to 256 texels.
@@ -180,9 +178,17 @@ All of them are generic. Most are on boubou666's `main`; the rest are the `sc3/b
 
 - VU1 interpreter split into inline upper/lower/step headers, dead MAC and status flags skipped, FMAC arithmetic
   specialized per instruction; the EFU opcodes were off by one (0x79 is ERSQRT, 0x7C ESIN, 0x7D EATAN, 0x7E EEXP).
-- `ps2_vu1_compile`: microprograms compiled ahead of time into single-entry segments with static stall elision,
-  run unchecked; about 5.8 ns per VU cycle against ~20 for the interpreter, with zero mismatches on recorded SC3
-  runs. VU0 microprograms are compiled too (their flags stay exact: the EE reads them with CFC2).
+- **Compiled microcode: `ps2_vu_aot`.** The port first compiled its microprograms with its own `ps2_vu1_compile`,
+  from code images dumped while playing, into single-entry segments with static stall elision (about 5.8 ns per VU
+  cycle against ~20 for the interpreter). It now uses main's `ps2_vu_aot`, shared with the other ports, which reads
+  the microcode straight from the ELF and compiles blocks with the stalls scheduled at compile time and the VU
+  registers in locals. VU0 microprograms are compiled too (their flags stay exact: the EE reads them with CFC2).
+- **Sticky-flag elision (3c1da2df, fc88d9b8, e27fba56).** `ps2_vu_aot` skipped the MAC and status writes no reader
+  sees only when no microprogram of the ELF can read the sticky status bits. SC3 has FSEQ readers, so all 3,282 of its compiled VU1
+  FMACs computed and queued exact flags with a clock advance before each, and they took most of the VU1 thread,
+  which is why the port kept its own compiler. Such an FMAC now keeps only what it adds to the sticky bits, folded
+  in before any flag write a reader sees, which brought `ps2_vu_aot` to the speed the port needs and let it move
+  to plain `main` (with the earlier block-exit, rounding and operand normalization work, e73aba08).
 - The UNPACK fast path, XGKICK copying whole elapsed qwords, PATH1 catching up only from where it last did.
 
 ### Diagnostics added for this port
