@@ -151,6 +151,13 @@ All of them are generic and on boubou666's `main`, which the submodule follows; 
   exchange in 17,000 lost a chunk. After a BGM stop the EE side's restart waits for the whole 0x4000 ring, so the
   player stayed in PREP forever and Chronicles froze on the DECISIVE BATTLE banner. No interrupt dispatch while
   interrupts are suspended, and the masked thread keeps the CPU across slices (64181c70).
+- **Audio "frying".** Three causes. The IOP scheduler let a lower-id thread of equal priority preempt the
+  running one at every slice end, so CRI thread 7 cut into the ADX mixer thread 10 (both priority 39) and the
+  right channel sent stale samples; equal priorities now keep the CPU until they block (389bf5a). Calls the EE ran
+  inline on the IOP were never charged against the cycles the EE paid for, so the SPU2 produced 0.9-2.5% more
+  audio than real time (fffb0c0). The host time stretcher spliced on every burst of that jitter; it now plays
+  contiguous grains while the stream is at pace (0177887). Over the regression route the SPU2 now produces
+  48,084 frames per second for 48,112 taken, at a stretch rate of 1.00 throughout.
 
 ### GS, DMA and VIF
 
@@ -217,8 +224,6 @@ Things that look wrong but are the game:
 Open:
 
 - The Chronicles field map and its battles dip to ~53-55 fps, with choppy sound when units move on the map.
-- Reported while watching recorded runs (not yet from a human playthrough): audio "frying" and brief slowdowns.
-  Those runs dumped frames every 0.25 to 1 s, which may contribute. Under investigation.
 - Heavy random stages of the attract demo run with the EE at ~89% of real time, bound by the VU1 worker.
 - The Single Player menu preview panel shows noise (seen with `PS2X_SC3_NO_MOVIES`; previews are fine with
   movies on).
