@@ -116,7 +116,8 @@ files; a clean build of the tools and the game (recompile included) takes about 
 7800X3D, most of it the runner. `scripts/build_runtime.sh Release` or `Debug` picks another build type, and `CXX`
 another compiler (Clang is used when it is installed).
 
-A controller is used when one is connected; otherwise the keyboard (US key positions):
+A controller is used when one is connected; otherwise the keyboard (US key positions). A second gamepad plays
+player 2:
 
 | PS2 button | Keyboard |
 |---|---|
@@ -141,6 +142,7 @@ A controller is used when one is connected; otherwise the keyboard (US key posit
 | `PS2X_SC3_NO_MOVIES=1` | Skip the one-shot movies (for tests) |
 | `PS2X_SC3_AUTOWIN=1` | Keep the player at full health and the opponent at 1 HP, so scripted input wins each fight |
 | `PS2X_PAD_SCRIPT=t:BUTTON[/ms],…` | Scripted button presses (seconds from start); `PS2X_PAD_INPUT=<file>` reads presses appended to a file while the game runs |
+| `PS2X_PAD2_SCRIPT=t:BUTTON[/ms],…` | Player 2's scripted presses in the same format; plugs in the second controller without a second gamepad |
 | `PS2X_STATE_DUMP=<s>` | Every few seconds: EE and IOP threads, GS frames, EE speed, DMA and VIF counters, SPU2 state |
 | `PS2X_FRAME_DUMP=<dir>`, `PS2X_FRAME_DUMP_EVERY=<s>` | Save the presented frame as raw 640x448 RGBA |
 | `PS2X_PROFILE=<s>` | Sampling profiler: where every host thread spends its time |

@@ -235,7 +235,7 @@ Paths below are relative to the repository; `scripts/run.sh` passes extra enviro
   `[state] gs frames`, EE speed from `grep -o '\[state\] ee cycle=[0-9]*'` (differences of ~1474M per 5 s = 100%).
   `[MC]` log lines lack a newline, so anchored `^\[state\]` greps drop some state lines.
 - **Live input**: `PS2X_PAD_INPUT=<file>` presses the buttons of each line appended to the file while the game
-  runs, one word every 0.35 s (`echo "down down cross" >> file`, `cross+up` presses both); `PS2X_PAD_SCRIPT=t:BUTTON[/ms],...` schedules presses in seconds from start. In zsh,
+  runs, one word every 0.35 s (`echo "down down cross" >> file`, `cross+up` presses both); `PS2X_PAD_SCRIPT=t:BUTTON[/ms],...` schedules presses in seconds from start. `PS2X_PAD2_SCRIPT` takes the same format for player 2 (second controller, SIO2 port 1). In zsh,
   write `"${t}:cross"`, not `"$t:cross"` (`:c` is a history modifier). Route to Free Training: Start x4 on the
   title, Cross (Single Player), Down x4 + Cross (Practice), Down + Cross (Free Training), Cross to pick the
   characters and stage (stage select defaults to Random; Right picks a fixed one).
