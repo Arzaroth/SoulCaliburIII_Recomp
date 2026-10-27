@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 project(SoulCaliburIII_Recomp LANGUAGES C CXX)
 
 set(SC3_GENERATED_DIR "${CMAKE_SOURCE_DIR}/generated" CACHE PATH
-    "Output of ps2_recomp for SLUS_212.16 (scripts/recomp.sh), VU1 microcode in vu1/ (scripts/compile_vu1.sh)")
+    "Output of ps2_recomp for SLUS_212.16 (scripts/recomp.sh), VU1 microcode compiled by ps2_vu_aot in vu1/")
 
 set(PS2X_BUILD_RECOMP OFF CACHE BOOL "" FORCE)
 set(PS2X_BUILD_ANALYZER OFF CACHE BOOL "" FORCE)
@@ -26,17 +26,16 @@ file(GLOB SC3_RUNTIME_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/runtime/*.c
 
 file(GLOB SC3_VU1_SOURCES CONFIGURE_DEPENDS "${SC3_GENERATED_DIR}/vu1/*.cpp")
 if(SC3_VU1_SOURCES)
-    set_source_files_properties(${SC3_VU1_SOURCES} PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
-else()
-    message(STATUS "SoulCaliburIII_Recomp: no compiled VU1 microcode in ${SC3_GENERATED_DIR}/vu1, "
-        "VU1 runs in the interpreter (scripts/compile_vu1.sh)")
+    set_property(GLOBAL APPEND PROPERTY JOB_POOLS sc3_vu1_aot=4)
+    add_library(sc3_vu1_aot OBJECT ${SC3_VU1_SOURCES})
+    target_link_libraries(sc3_vu1_aot PRIVATE ps2_runtime)
+    set_target_properties(sc3_vu1_aot PROPERTIES UNITY_BUILD OFF JOB_POOL_COMPILE sc3_vu1_aot)
+    target_compile_options(sc3_vu1_aot PRIVATE -O3 -g0)
+    target_sources(ps2EntryRunner PRIVATE $<TARGET_OBJECTS:sc3_vu1_aot>)
 endif()
 
-target_sources(ps2EntryRunner PRIVATE ${SC3_GENERATED_SOURCES} ${SC3_RUNTIME_SOURCES} ${SC3_VU1_SOURCES})
-# ps2_vu1_compile output includes "../lib/vu/ps2_vu1_step.h", a path relative to the runtime's runner directory.
-target_include_directories(ps2EntryRunner PRIVATE
-    "${SC3_GENERATED_DIR}"
-    "${CMAKE_SOURCE_DIR}/PS2Recomp/ps2xRuntime/src/runner")
+target_sources(ps2EntryRunner PRIVATE ${SC3_GENERATED_SOURCES} ${SC3_RUNTIME_SOURCES})
+target_include_directories(ps2EntryRunner PRIVATE "${SC3_GENERATED_DIR}")
 
 list(LENGTH SC3_GENERATED_SOURCES _sc3_count)
 list(LENGTH SC3_VU1_SOURCES _sc3_vu1_count)
