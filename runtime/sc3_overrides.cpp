@@ -18,6 +18,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 extern "C"
@@ -1106,6 +1107,7 @@ namespace
     PS2Runtime::RecompiledFunction g_frameEndElapsedLines = nullptr;
     uint64_t g_frameEndCycle = 0;
     int64_t g_eeLead = 0;
+    bool g_frameEndWoken = false;
 
     struct FrameTrace
     {
@@ -1153,7 +1155,6 @@ namespace
     double nativeFrameEnd(PS2Runtime *runtime)
     {
         EeScheduler &scheduler = runtime->eeScheduler();
-        runtime->framePacer().frameEnd();
         const double step = hostFrameStep();
         const int64_t real = static_cast<int64_t>(step * static_cast<double>(EeScheduler::kEeClockHz));
         g_eeLead += static_cast<int64_t>(scheduler.currentCycle() - g_frameEndCycle) - real;
@@ -1172,6 +1173,17 @@ namespace
         return std::min(step, 1.0);
     }
 
+    std::chrono::steady_clock::time_point nextFrameDeadline(PS2Runtime *runtime)
+    {
+        using Clock = std::chrono::steady_clock;
+        static Clock::time_point next = Clock::now();
+        const uint32_t cap = runtime->framePacer().cap();
+        const Clock::time_point now = Clock::now();
+        next = cap == 0u ? now
+                         : std::max(now, next + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(1.0 / cap)));
+        return next;
+    }
+
     // The main loop (0x12db20) ends its frame with an inline Timer 3 wait on 0x148098 until the lines elapsed since
     // the last frame reach its target (sp+0x30), then calls it once more to record the frame's length.
     void frameEndElapsedLines(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -1186,7 +1198,7 @@ namespace
             ctx->pc = ra;
             return;
         }
-        if (ra == kFrameEndReturn)
+        if (ra == kFrameEndReturn && !std::exchange(g_frameEndWoken, false))
         {
             static const bool trace = std::getenv("SC3_TRACE_FRAMES") != nullptr;
             EeScheduler &scheduler = runtime->eeScheduler();
@@ -1198,6 +1210,27 @@ namespace
                 g_eeLead = 0;
                 hostFrameStep();
             }
+            static const bool sleep = [] { const char *v = std::getenv("SC3_FRAME_SLEEP"); return v && v[0] == '1'; }();
+            const auto deadline = sleep && scheduler.nativeFrames() ? nextFrameDeadline(runtime)
+                                                                    : std::chrono::steady_clock::time_point{};
+            if (scheduler.nativeFrames() && deadline > std::chrono::steady_clock::now())
+            {
+                scheduler.waitHostDeadline(
+                    deadline,
+                    [runtime]
+                    {
+                        const double step = nativeFrameEnd(runtime);
+                        if (trace)
+                            traceFrame(runtime, step);
+                    },
+                    [](R5900Context &resume)
+                    {
+                        g_frameEndWoken = true;
+                        resume.pc = kElapsedLines;
+                    });
+            }
+            if (scheduler.nativeFrames())
+                runtime->framePacer().frameEnd();
             const double step = scheduler.nativeFrames() ? nativeFrameEnd(runtime) : hostFrameStep();
             if (trace)
                 traceFrame(runtime, step);
