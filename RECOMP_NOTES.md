@@ -166,16 +166,19 @@ XGKICK packets through `GifToNative` into the GS targets, at the program's point
   `pause_native_psnr` against `pause_floor_psnr` (two VU1 stills of the same pause). `SC3_NATIVE_VU1_ONLY` keeps the
   programs it does not list on VU1.
 
-The sandbox draws the right geometry everywhere, with the effects (weapon trails, hit sparks, guard flashes), but not
-yet the same picture: the pause compares at 20 dB against a floor of 30-34 dB. Fixed in PS2Recomp on the way
-(`sc3/native-gif-blend`): ALPHA 0x58 (Cs * Ad + Cd) blends with the target's alpha at the GS's scale, 0x0a (A == B)
-is opaque, blended draws store As, TEX0's TFX and TCC, and REGION_REPEAT / REGION_CLAMP windows (SC3 masks 32 to
-256-texel windows of 1024x1024 textures; decoding them whole held the sandbox at 2 fps). Still different: textures
-are taken from the cache when the EE kicks the transfer, but SC3 streams its textures and palettes through the same
-GS memory every frame, so some draws get another frame's texels (looking them up at the group's GS marker instead
-was worse: 12.5 dB); a floor strip under the fighters stays black; TEX1 filtering and mipmaps are not modelled.
-Speed: the fight runs 29.2 fps capped and 32.4 uncapped on the sandbox, against 59.6 and 87.7 on VU1, the game
-thread spending most of its time decoding textures on the CPU (`TextureCache::decodeTexel`).
+With the native GS renderer the sandbox's packets go to the GS back end itself (`Config::gsWrites`, TTA's
+`tlotr/native-vu1-gs`): each batch carries the register writes its packet made (TEX0 with its CLUT load, CLAMP, TEX1,
+ALPHA, TEST), replayed at the group's marker, so textures, CLUTs, regions, mipmaps and blending are the back end's,
+in GS stream order. With S, T and Q kept as the packet had them (`sc3/native-gif-q`: U / V had been interpolated in
+screen space), the pause still on the sandbox matches VU1: 34.6 dB against a floor of 34.4 dB, the floor strip under
+the fighters drawn. Weapon trails, hit sparks and guard flashes show in captures every second over the fight.
+`SC3_NATIVE_VU1_GSWRITES=0` draws through the native renderer's own pass instead (20 dB, after the
+`sc3/native-gif-blend` fixes: Ad blends, A == B opaque, As stored, TFX / TCC, REGION_REPEAT / REGION_CLAMP windows).
+
+Speed in Free Training: 42.3 fps capped and 43-44 with the fight uncapped (`REGRESS_FIGHT_FRAME_CAP=0`) on the
+sandbox, against 59.8 and 64-69 on VU1. The sandbox's microprograms run on the game thread, which also waits for the
+VIF1 worker (`waitForVif1Clock`) as before. The fight test is approximate: both health words stay at 240 from the
+title's attract fight on, so the sandbox also runs in the menus after it (they draw the same).
 
 ### Test harness and tracers
 
@@ -191,6 +194,8 @@ thread spending most of its time decoding textures on the CPU (`TextureCache::de
   `scripts/imgdiff.py` compares two frames (PSNR, a diff image) with Python's standard library only. Runs differ in
   stage and poses, so compare stills from one run (`REGRESS_NATIVE_VU1_AB`, `REGRESS_PAUSE_HIDE`), not across runs
   (two VU1 runs' pause stills: 13 dB). `REGRESS_SHOT_SECS=1 REGRESS_KEEP_SHOTS=1` keeps a capture a second.
+  `REGRESS_FIGHT_FRAME_CAP=0` uncaps the fight only (`SC3_FRAME_CAP_FILE`): with `PS2X_FRAME_CAP=0` the menus run
+  ahead of the route's presses and it ends in Character Creation.
 - `SC3_TRACE_FRAMES=1`: every 5 s, the main loop's frames per second, the frames over 25 ms, the longest, EE time's
   lead over real time and the vsync count; each frame over 50 ms on its own.
 - `SC3_FRAME_SLEEP=1`: native frames end on `EeScheduler::waitHostDeadline` (other guest threads run while the
