@@ -1136,8 +1136,11 @@ namespace
         // Each of the ~30 SIGNAL handshakes per frame would wait out the modelled GS interrupt latency in turn
         // (Free Training 22 -> 18 fps), and the game does not need the stall to draw correctly.
         runtime.memory().setSignalStallEnabled(false);
-        // The GPU renderer keeps fights near 30 fps where the CPU rasterizer falls to ~20 under host load.
-        std::cerr << "[sc3] GS renderer: " << (runtime.gs().requestParallelRenderer() ? "paraLLEl-GS" : "CPU") << std::endl;
+        // The native GS renderer (GSNativeBackend, OpenGL) by default; PS2X_GS_RENDERER=parallel or cpu chooses another.
+        const char *gsRenderer = runtime.requestNativeGsRenderer()            ? "native (OpenGL)"
+                                 : runtime.gs().requestParallelRenderer() ? "paraLLEl-GS"
+                                                                          : "CPU";
+        std::cerr << "[sc3] GS renderer: " << gsRenderer << std::endl;
         runtime.registerFunction(kMwPlyGetStat, mwPlyGetStatPlayEnd);
         runtime.registerFunction(kMwPlyGetCurFrm, mwPlyGetCurFrmHost);
         runtime.registerFunction(kMwPlyRelCurFrm, mwPlyRelCurFrmHost);
