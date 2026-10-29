@@ -1316,7 +1316,8 @@ namespace
         // (Free Training 22 -> 18 fps), and the game does not need the stall to draw correctly.
         runtime.memory().setSignalStallEnabled(false);
         // The native GS renderer (GSNativeBackend, OpenGL) by default; PS2X_GS_RENDERER=parallel or cpu chooses another.
-        const char *gsRenderer = runtime.requestNativeGsRenderer()            ? "native (OpenGL)"
+        const bool nativeGs = runtime.requestNativeGsRenderer();
+        const char *gsRenderer = nativeGs                                     ? "native (OpenGL)"
                                  : runtime.gs().requestParallelRenderer() ? "paraLLEl-GS"
                                                                           : "CPU";
         std::cerr << "[sc3] GS renderer: " << gsRenderer << std::endl;
@@ -1341,7 +1342,7 @@ namespace
             runtime.registerFunction(kInitAfsUpdate, initAfsUpdateTraced);
         if (const char *trace = std::getenv("PS2X_SC3_TRACE_TASKS"); trace && *trace)
             runtime.registerFunction(kCreateTask, createTaskTraced);
-        sc3::installNativeVu1(runtime);
+        sc3::installNativeVu1(runtime, nativeGs);
     }
 }
 

@@ -265,7 +265,7 @@ namespace sc3
         }
     }
 
-    void installNativeVu1(PS2Runtime &runtime)
+    void installNativeVu1(PS2Runtime &runtime, bool nativeGs)
     {
         const char *value = std::getenv("SC3_NATIVE_VU1");
         const char *hide = std::getenv("SC3_NATIVE_VU1_HIDE");
@@ -307,12 +307,15 @@ namespace sc3
         config.choose = choose;
         config.draw = [](Vu1StreamAdapter &, uint32_t, bool) {};
         config.directs = s.mode == Mode::Sandbox;
+        const char *gsWrites = std::getenv("SC3_NATIVE_VU1_GSWRITES");
+        config.gsWrites = nativeGs && !(gsWrites && *gsWrites == '0');
         if (s.mode == Mode::Sandbox)
             config.active = [] { return g_state.sandbox && inFight(); };
         Vu1StreamAdapter::instance().install(config);
         std::cerr << "[sc3] native VU1: "
                   << (s.mode == Mode::Sandbox ? "every program on the sandbox in fights" : "observed, every program on VU1")
                   << (s.hidden.empty() && s.hidePath.empty() ? "" : ", some hidden")
-                  << (s.only.empty() ? "" : ", only some on the sandbox") << std::endl;
+                  << (s.only.empty() ? "" : ", only some on the sandbox")
+                  << (config.gsWrites ? ", drawn by the GS back end" : ", drawn by the native renderer") << std::endl;
     }
 }
