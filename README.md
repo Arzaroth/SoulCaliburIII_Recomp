@@ -15,8 +15,8 @@ Not an emulator: the game's own MIPS R5900 code, rebuilt as a native program on 
 <img src="docs/screenshots/chronicles_field.jpg" width="49%"> <img src="docs/screenshots/stage_select.jpg" width="49%">
 <img src="docs/screenshots/fight_2.jpg" width="49%"> <img src="docs/screenshots/opening_movie.jpg" width="49%">
 
-<sub>Captured from the running port on the <a href="#native-branch">native branch</a>: native OpenGL GS renderer at
-twice the internal resolution (<code>PS2X_GS_SCALE=2</code>, 1280x896), scaled to 960x720.</sub>
+<sub>Captured from the running port: native OpenGL GS renderer at twice the internal resolution
+(<code>PS2X_GS_SCALE=2</code>, 1280x896), scaled to 960x720.</sub>
 
 </div>
 
@@ -30,15 +30,12 @@ twice the internal resolution (<code>PS2X_GS_SCALE=2</code>, 1280x896), scaled t
 
 ## Status
 
-**Playable from start to finish in automated tests, now in human testing.** Fights run at 60 frames per second in
-real time on a Ryzen 7 7800X3D with the GPU renderer, with music and voices, and the sound no longer "fries" (IOP
-thread scheduling, IOP clock and time stretcher fixes). Every mode has been played through with scripted input: Tales
+**Playable from start to finish in automated tests, now in human testing.** The port runs on PS2Recomp's native
+target: the GS stream drawn with OpenGL, the IOP modules recompiled, the SPU2 on the wall clock. Fights run at about
+58 frames per second on a Ryzen 7 7800X3D, with music and voices. Every mode has been played through with scripted input: Tales
 of Souls to the credits, Chronicles of the Sword battles on the field map, World Competition, Soul Arena, Museum,
-Character Creation, Shop and Options, with saves loaded back after a restart. `main` builds on PS2Recomp's upstream
-`main` (7312280) and runs the game's own `rand`: the 15-bit stub it used to be bound to made every random pick 0.
-
-The port is moving to the native target the other PS2Recomp ports use; that work is on the `native` branch, see
-[Native branch](#native-branch).
+Character Creation, Shop and Options, with saves loaded back after a restart. The game runs its own `rand`: the
+15-bit stub it used to be bound to made every random pick 0.
 
 | Milestone | |
 |---|:---:|
@@ -47,27 +44,26 @@ The port is moving to the native target the other PS2Recomp ports use; that work
 | Logos and movies (CRI Sofdec, decoded on the host) | ✅ |
 | Title screen, menus, character and stage select | ✅ |
 | Music and voices (CRI ADX on the game's own `CRI_ADXI.IRX`, SPU2) | ✅ |
-| Fights at 60 fps (VU1 on its own thread, GPU renderer) | ✅ |
+| Fights at 58-60 fps (VU1 on its own thread) | ✅ |
 | Tales of Souls, World Competition, Soul Arena, Museum, Shop | ✅ |
 | Chronicles of the Sword: story, field map, battles | ✅ |
 | Memory card: save and load | ✅ |
 | Random picks (the game's own `rand`) | ✅ |
 | Long play sessions by a human | 🔧 |
-| Native GS renderer (OpenGL), recompiled IOP modules, SPU2 on the wall clock | 🔧 `native` branch |
-| Higher internal resolution (`PS2X_GS_SCALE`) | 🔧 `native` branch |
+| Native GS renderer (OpenGL), recompiled IOP modules, SPU2 on the wall clock | ✅ |
+| Higher internal resolution (`PS2X_GS_SCALE`) | ✅ |
 | Frame loop on the native FramePacer | 🔧 |
 | Widescreen | ⏳ |
 
-✅ works on `main` · 🔧 in progress · ⏳ not reached yet
+✅ works · 🔧 in progress · ⏳ not reached yet
 
-### Native branch
+### Native target
 
-The `native` branch moves the port to the native target the other PS2Recomp ports run on. It pins PS2Recomp's
-`sc3/native` integration branch (`native/renderer` plus the SC3 fixes below, 6c95560) and is not merged into `main`
-yet.
+The port runs on the native target the other PS2Recomp ports use. It pins PS2Recomp's `sc3/native` integration
+branch: `native/renderer` plus the SC3 fixes below, on their way into `native/renderer`.
 
-- **Native GS renderer by default**: PS2Recomp's GS back end translates the GS stream into OpenGL draws
-  (`GSNativeBackend`), without paraLLEl-GS; `PS2X_GS_RENDERER=parallel` or `cpu` picks the others. SC3 needed four
+- **Native GS renderer**: PS2Recomp's GS back end translates the GS stream into OpenGL draws (`GSNativeBackend`),
+  with no GS emulation. SC3 needed four
   fixes in it: pixels sampled at their integer coordinates as the GS does (a one-pixel seam every 64 pixels and a
   soft picture before), HIGHLIGHT and HIGHLIGHT2 adding the vertex alpha at its own scale, blending with Ad at the
   GS's scale, and draws testing against the Z buffer their ZBUF names (the shadow pass darkened the whole frame).
@@ -75,11 +71,9 @@ yet.
 - **IOP modules recompiled**: `scripts/iop_recomp.sh` turns the eight IRX modules into native code (813 functions,
   none left to the interpreter); `PS2X_IOP_NATIVE=0` interprets them again.
 - **SPU2 on the wall clock** by default (`PS2X_SPU2_WALLCLOCK=1` in the scripts), with an AutoDMA fix so the ADX
-  stream gets each half's interrupt in time. A movie sound regression it brings is being fixed.
-- **Speed**: the regression route runs at 58.2 fps at the native scale and 58.1 fps at `PS2X_GS_SCALE=2`, against
-  60.1 fps on `main` with paraLLEl-GS; the frame loop on PS2Recomp's FramePacer is in progress.
-
-[RECOMP_NOTES.md](RECOMP_NOTES.md) on the `native` branch has the details and the measurements.
+  stream gets each half's interrupt in time, and kept within 512 samples of the IOP clock.
+- **Speed**: the regression route runs at 58.2 fps at the native scale and 58.1 fps at `PS2X_GS_SCALE=2`; the frame
+  loop on PS2Recomp's FramePacer is in progress.
 
 [RECOMP_NOTES.md](RECOMP_NOTES.md) records how the port was brought up, every fix and how it was found.
 
@@ -105,18 +99,17 @@ disc files ──► Ghidra (headless, EE) + ps2_analyzer + recomp/*_hints.txt �
   pointers, jump tables or tail calls (the hint lists in `recomp/`).
 - PS2Recomp turns every function into C++. `ps2_vu_aot` finds the VU1 and VU0 microprograms in the ELF and compiles
   them ahead of time; VU1 runs on its own thread ahead of the game, syncing only when the game reads VU1 state.
-- The GS stream is translated into OpenGL draws by PS2Recomp's native GS back end (`PS2X_GS_RENDERER=native`, the
-  default), with [paraLLEl-GS](https://github.com/Arntzen-Software/parallel-gs) (Vulkan compute) and the CPU
-  rasterizer as fallbacks.
+- The GS stream is translated into OpenGL draws by PS2Recomp's native GS back end, the CPU rasterizer stays as the
+  validation reference.
 - `runtime/sc3_overrides.cpp` holds the game-specific bindings: reserved memory, a host Sofdec movie player and
   mixer, the renderer and timing choices, and diagnostic tracers.
 
 The runtime is the `PS2Recomp/` git submodule: [boubou666/PS2Recomp](https://github.com/boubou666/PS2Recomp), branch
-`main`, the fork shared with the *Twisted Metal: Black*, *Valkyrie Profile 2: Silmeria*, *The Lord of the Rings: The
-Third Age* and *Drakengard* recompilations. There is no SC3 branch: the port builds on the same runtime as the others.
+`sc3/native` (`native/renderer` plus SC3's fixes), the fork shared with the *Twisted Metal: Black*, *Valkyrie Profile 2: Silmeria*, *The Lord of the Rings: The
+Third Age* and *Drakengard* recompilations; the port builds on the same runtime as the others.
 The top-level `CMakeLists.txt` builds its runtime, swaps its placeholder function table for the generated one and
 links the generated code, `runtime/` and the compiled VU1 microcode into `ps2EntryRunner`. Every fix made for this
-port is generic and on that `main`, for example the IOP interrupt suspension that kept CRI ADX streams alive, the VU0
+port is generic and shared, for example the IOP interrupt suspension that kept CRI ADX streams alive, the VU0
 VCLIP flags and VU1 run-ahead on its own clock.
 
 ## Requirements
@@ -125,7 +118,7 @@ VCLIP flags and VU1 run-ahead on its own clock.
 - CMake 3.21+, Ninja, Clang with C++20, rsync, and bsdtar (libarchive) to extract the disc
 - FFmpeg development libraries (`libavcodec`, `libavformat`, `libavutil`, `libswresample`, `libswscale`)
 - X11/Wayland and OpenGL development headers (raylib is fetched and built by the runtime)
-- A Vulkan driver for the GPU renderer (any recent NVIDIA, AMD or Intel driver)
+- An OpenGL 4.5 driver (any recent NVIDIA, AMD or Intel driver)
 - Ghidra with the Emotion Engine extension, only to regenerate the function map
 - Your own copy of `SLUS-21216` as a disc image (the extracted ELF is checked against the hash above)
 
@@ -138,7 +131,7 @@ scripts/extract_iso.sh "/path/to/Soulcalibur III (USA).iso"   # disc files -> ga
 scripts/build_tools.sh                                         # ps2_recomp, ps2_analyzer, ps2_vu_aot -> build/tools
 scripts/recomp.sh                                              # SLUS_212.16 + recomp/sc3.toml -> generated/, VU microcode -> generated/vu1/
 scripts/build_runtime.sh                                       # runtime + generated code -> build/game (RelWithDebInfo)
-scripts/iop_recomp.sh && scripts/build_runtime.sh             # optional: the IRX modules as native code -> generated/iop/
+scripts/iop_recomp.sh && scripts/build_runtime.sh             # the IRX modules as native code -> generated/iop/
 scripts/run.sh                                                 # ps2EntryRunner game/SLUS_212.16
 ```
 
@@ -174,7 +167,9 @@ player 2:
 
 | Variable | Effect |
 |---|---|
-| `PS2X_GS_RENDERER=parallel` or `cpu` | Draw with paraLLEl-GS (Vulkan) or the CPU rasterizer. The default is the native GS back end (OpenGL); without it paraLLEl-GS, which falls back to the CPU when no Vulkan device is found |
+| `PS2X_GS_RENDERER=cpu` | Draw with the CPU rasterizer, the reference, instead of the native GS back end |
+| `PS2X_GS_SCALE=<n>` | Internal resolution multiplier of the native GS back end |
+| `PS2X_IOP_NATIVE=0` | Interpret the IRX modules instead of running their recompiled code |
 | `PS2X_VIF1_THREAD=0` | Run VIF1 and the VU1 microcode on the game thread (default: their own thread, about a third faster in fights) |
 | `PS2X_EE_CATCHUP=0\|field\|1` | Wall-clock catch-up: SC3 defaults to off, so emulated time never runs faster than real time |
 | `PS2X_SC3_NO_MOVIES=1` | Skip the one-shot movies (for tests) |
@@ -204,7 +199,7 @@ player 2:
 
 | Path | Contents |
 |---|---|
-| `PS2Recomp/` | The recompiler and runtime (git submodule, boubou666/PS2Recomp branch `main`) |
+| `PS2Recomp/` | The recompiler and runtime (git submodule, boubou666/PS2Recomp branch `sc3/native`) |
 | `CMakeLists.txt` | Builds the runtime with the generated code and the game overrides linked in |
 | `recomp/` | Recompiler config (`sc3.toml`), the Ghidra function map and the entry-point hint lists |
 | `runtime/` | Game override module (`sc3_overrides.cpp`) |
@@ -221,5 +216,4 @@ Never commit or redistribute it.
 
 - [PS2Recomp](https://github.com/ran-j/PS2Recomp) by ran-j and contributors (GPL), the recompiler and runtime this port is built on.
 - [boubou666/PS2Recomp](https://github.com/boubou666/PS2Recomp) and the *Twisted Metal: Black*, *Valkyrie Profile 2: Silmeria*, *The Lord of the Rings: The Third Age* and *Drakengard* recompilations developed on it; runtime fixes are shared both ways.
-- [paraLLEl-GS](https://github.com/Arntzen-Software/parallel-gs) by Arntzen Software (Hans-Kristian Arntzen, Runar Heyer), LGPL-3.0+, the GPU renderer; fetched at build time by the PS2Recomp runtime.
 - *Soulcalibur III* © Bandai Namco Entertainment, developed by Project Soul. This is an unofficial fan project, not affiliated with or endorsed by them.

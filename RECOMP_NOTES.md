@@ -52,10 +52,10 @@ sets up the following.
   GIF and VIF1 paths (the GS interrupt handler 0x10E658 restarts both chains when both have signalled). Waiting
   out the modelled GS interrupt latency at each one cost about 20% (Free Training 22 -> 18 fps at the time) and
   the game draws correctly without the stall.
-- **Native GS renderer preferred** (`PS2Runtime::requestNativeGsRenderer`, then `GS::requestParallelRenderer`). The
-  GS stream becomes OpenGL draws (docs/native.md in PS2Recomp). Free Training: 58 fps against paraLLEl-GS's 60, with
-  vertical seams every 64 pixels and a softer picture. `PS2X_GS_RENDERER=parallel` or `cpu` keeps another path. The
-  GPU renderers keep fights at speed where the CPU rasterizer fell to ~20 fps under host load.
+- **Native GS renderer** (`PS2Runtime::requestNativeGsRenderer`). The GS stream becomes OpenGL draws (docs/native.md
+  in PS2Recomp). Free Training runs at 58 fps; the vertical seams every 64 pixels, the soft picture and the darkened
+  frame were GS back end bugs, fixed on PS2Recomp sc3/native-gs-seams (pixel centres, HIGHLIGHT alpha, Ad blending,
+  the Z buffer a draw's ZBUF names). `PS2X_GS_RENDERER=cpu` draws with the CPU reference instead.
 - **SPU2 on the wall clock by default** (`PS2X_SPU2_WALLCLOCK=1` in scripts/run.sh, regress.sh and sc3run.sh;
   `=0` keeps the stretched IOP-clock output). The IOP mixes into a queue the audio callback takes from, so SC3's ADX
   stream (CRI ADXI, AutoDMA on core 1, one 256-sample half ahead) gets each half's interrupt before the next half
@@ -224,7 +224,7 @@ F3 overlay.
 
 ## Status
 
-Every mode has been played through with scripted input on the GPU renderer: Tales of Souls to the credits and the
+Every mode has been played through with scripted input: Tales of Souls to the credits and the
 first save, Chronicles of the Sword (story, editor, briefing, field map, battles, results), World Competition, Soul
 Arena, Museum, Character Creation, Shop and Options, with saves loaded back after a restart. Movies play with
 sound and skip with Start.
@@ -246,15 +246,13 @@ Open:
   movies on).
 - The root cause of the ordering-table double link behind the old menu-transition freeze was never found: it no
   longer reproduces since catch-up is off and the GS/CD timing fixes, but other timings may bring it back.
-- Not reached yet on `main`: widescreen and higher internal resolution.
+- Not reached yet: widescreen, and the frame loop on PS2Recomp's FramePacer (the vblank grid still paces frames).
 
-On the `native` branch (not merged), the port runs on the native target the other ports use, through PS2Recomp's
-`sc3/native` integration branch (6c95560): the native GS renderer (`GSNativeBackend`, OpenGL) by default with the SC3
-fixes for pixel centres and the 64-pixel seams, HIGHLIGHT alpha, Ad blending and the Z buffer a draw's ZBUF names
-(shadows); the SPU2 on the wall clock; the eight IRX modules recompiled (813 functions, `scripts/iop_recomp.sh`). The
-regression route runs at 58.2 fps (60.1 on `main` with paraLLEl-GS), and at 58.1 fps with `PS2X_GS_SCALE=2`
-(1280x896). Still open there: a movie sound regression with the SPU2 on the wall clock, and the frame loop on
-PS2Recomp's FramePacer. That branch's RECOMP_NOTES.md has the measurements.
+The port runs on the native target the other ports use, through PS2Recomp's `sc3/native` integration branch: the
+native GS renderer (`GSNativeBackend`, OpenGL) with the SC3 fixes for pixel centres and the 64-pixel seams, HIGHLIGHT
+alpha, Ad blending and the Z buffer a draw's ZBUF names (shadows); the SPU2 on the wall clock, kept within 512
+samples of the IOP clock; the eight IRX modules recompiled (813 functions, `scripts/iop_recomp.sh`). The regression
+route runs at 58.2 fps, and at 58.1 fps with `PS2X_GS_SCALE=2` (1280x896).
 
 ## Debugging recipes
 
