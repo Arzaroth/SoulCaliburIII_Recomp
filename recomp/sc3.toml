@@ -147,7 +147,6 @@ stubs = [
   "memset@0x0042D35C",
   "__malloc_lock@0x0042D420",
   "__malloc_unlock@0x0042D4A0",
-  "rand@0x0042D508",
   "strcasecmp@0x0042DAF0",
   "strcat@0x0042DBC8",
   "strchr@0x0042DCF4",
