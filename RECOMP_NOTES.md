@@ -120,6 +120,58 @@ callbacks: a started player blocks the main thread in `sceMpegGetPicture`. So pl
 `PS2X_SC3_NO_MOVIES=1` skips the one-shot movies only. Screens built on a looping movie wait for its frames: the
 Tales of Souls loading screen before the last episodes stayed on a white NOW LOADING when those were skipped too.
 
+### Native VU1 output (`runtime/sc3_native.cpp`, native layer 5)
+
+Opt-in, off by default. PS2Recomp's `Vu1StreamAdapter` reads every VIF1 stream at its DMA kick and decides, for each
+MSCAL, whether VU1 runs the program or the adapter's own VU1 (the sandbox, the same AOT code) runs it and draws its
+XGKICK packets through `GifToNative` into the GS targets, at the program's point of the GS stream.
+
+- SC3 has two VU1 programs, A (1177 pairs) and B (1352 pairs), both loaded at VU address 0 and swapped 23 times a
+  fight frame, so a start address alone does not say which one runs. The override hashes the resident code with the
+  hash the VU1 AOT names its fragments by (A `95e81f9a833c1b45`, B `d2fbf7af837a8df4`), again only after an MPG
+  (`Vu1StreamAdapter::codeVersion`). Nothing else ever runs on VU1 in the regress route.
+- `SC3_NATIVE_VU1=observe`: the adapter sees every chain, every program stays on VU1; `[sc3:vu1]` every 5 s counts
+  MSCALs by program and start address. Over the regress route the adapter's total is the state dump's `vu1 mscal`
+  less the last unreported 5 s (6071933 against 6077558), character select and loads included, and per frame they
+  agree in the fight (974.0 against 974.4). 58.37 fps, as without it.
+- `SC3_NATIVE_VU1_HIDE=<A:0x10,B:*,...>` (or `@file`, read at each frame end): those programs skipped and not drawn.
+  `REGRESS_PAUSE_HIDE` takes a pause still per entry. What each draws in Free Training:
+
+  | Entry | MSCALs per frame | Draws |
+  | --- | --- | --- |
+  | A:0x10 | 178 | the stage's main geometry (floor, walls, balustrade); hiding it also loses the fighters |
+  | A:0xd8 | 71 | distant stage props (pillars, lamps, background pieces) |
+  | A:0x2b0 | 77 | stage props near the camera (balustrade top, shadowed parts) |
+  | A:0xc18 | 11 | the sky and far background |
+  | A:0x1558 | 8 | a floor layer (the glossy tiles) |
+  | A:0x1730 | 13-17 | the floor's reflection (fighters and balustrade mirrored) |
+  | A:0x1ab8 | 56 | weapons |
+  | A:0x1c80, A:0x1f00 | 20, 37 | the weapons' and pillars' environment-mapped shine |
+  | A:0xa48, A:0x1d28 | 7, rare | nothing visible in the paused scene |
+  | B:0x1388 | 313 | the fighters' skinned bodies |
+  | B:0x10 | 58 | the fighters (hiding it removes them entirely, 0x1388 included) |
+  | B:0x15e8 | 60 | fighter parts (heads, sleeves, coat panels) |
+  | B:0x350, B:0x5b0, B:0x1990, B:0x1ca8, B:0x1ef0 | 10, 5, 8, 27, 15 | small fighter parts, not separable at this size |
+
+  Hiding a program also skips what it leaves in VU memory for the next ones, so a hidden setup program takes later
+  ones with it.
+- `SC3_NATIVE_VU1=1`: in fights (both health bars alive) every program runs on the sandbox, the draw-only DIRECTHL
+  packets too (none qualify: every DIRECTHL of a fight carries register setup). `SC3_NATIVE_VU1_SWITCH=<file>`
+  (1 sandbox, 0 VU1, read at each frame end) and `REGRESS_NATIVE_VU1_AB=1` compare the two on the frozen pause:
+  `pause_native_psnr` against `pause_floor_psnr` (two VU1 stills of the same pause). `SC3_NATIVE_VU1_ONLY` keeps the
+  programs it does not list on VU1.
+
+The sandbox draws the right geometry everywhere, with the effects (weapon trails, hit sparks, guard flashes), but not
+yet the same picture: the pause compares at 20 dB against a floor of 30-34 dB. Fixed in PS2Recomp on the way
+(`sc3/native-gif-blend`): ALPHA 0x58 (Cs * Ad + Cd) blends with the target's alpha at the GS's scale, 0x0a (A == B)
+is opaque, blended draws store As, TEX0's TFX and TCC, and REGION_REPEAT / REGION_CLAMP windows (SC3 masks 32 to
+256-texel windows of 1024x1024 textures; decoding them whole held the sandbox at 2 fps). Still different: textures
+are taken from the cache when the EE kicks the transfer, but SC3 streams its textures and palettes through the same
+GS memory every frame, so some draws get another frame's texels (looking them up at the group's GS marker instead
+was worse: 12.5 dB); a floor strip under the fighters stays black; TEX1 filtering and mipmaps are not modelled.
+Speed: the fight runs 29.2 fps capped and 32.4 uncapped on the sandbox, against 59.6 and 87.7 on VU1, the game
+thread spending most of its time decoding textures on the CPU (`TextureCache::decodeTexel`).
+
 ### Test harness and tracers
 
 - `PS2X_SC3_AUTOWIN=1`: on each GS interrupt during a fight, the player's health (float at 0x4D36A0) is set to
@@ -130,6 +182,10 @@ Tales of Souls loading screen before the last episodes stayed on a white NOW LOA
   (state machines such as the Art Gallery task, state at +0x130).
 - `PS2X_SC3_RATE=<addr,...>`: calls per 60 vsyncs of each function.
 - `PS2X_SC3_TRACE_PACING` (`_ALL`, `_SPAN`, `_FULL`): the frame limiter's Timer3 waits (0x148098).
+- `scripts/regress.sh` ends in the Free Training pause menu and keeps that frozen frame as `pause.png`;
+  `scripts/imgdiff.py` compares two frames (PSNR, a diff image) with Python's standard library only. Runs differ in
+  stage and poses, so compare stills from one run (`REGRESS_NATIVE_VU1_AB`, `REGRESS_PAUSE_HIDE`), not across runs
+  (two VU1 runs' pause stills: 13 dB). `REGRESS_SHOT_SECS=1 REGRESS_KEEP_SHOTS=1` keeps a capture a second.
 - `SC3_TRACE_FRAMES=1`: every 5 s, the main loop's frames per second, the frames over 25 ms, the longest, EE time's
   lead over real time and the vsync count; each frame over 50 ms on its own.
 - `PS2X_SC3_TRACE_GSIRQ=<n>` (`_VSYNC`, `_SPAN`): CSR, SIGLBLID and the VIF1/GIF chain addresses at the GS
