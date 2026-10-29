@@ -1105,6 +1105,7 @@ namespace
     constexpr uint32_t kFrameEndReturn = 0x0012EA90u;
     PS2Runtime::RecompiledFunction g_frameEndElapsedLines = nullptr;
     uint64_t g_frameEndCycle = 0;
+    int64_t g_eeLead = 0;
 
     struct FrameTrace
     {
@@ -1130,7 +1131,8 @@ namespace
         if (trace.seconds < 5.0)
             return;
         std::cerr << "[sc3] frames: " << trace.frames / trace.seconds << " fps, over 25 ms " << trace.over25ms
-                  << ", longest " << trace.longest * 1000.0 << " ms, limiter waits skipped " << trace.waitsSkipped
+                  << ", longest " << trace.longest * 1000.0 << " ms, EE lead "
+                  << g_eeLead * 1000 / static_cast<int64_t>(EeScheduler::kEeClockHz) << " ms, limiter waits skipped " << trace.waitsSkipped
                   << ", vsync " << runtime->eeScheduler().currentVSyncTick() << std::endl;
         trace = FrameTrace{};
     }
@@ -1145,24 +1147,29 @@ namespace
         return step;
     }
 
-    // The FramePacer's step stops at 0.1 s, but a load stalls a frame for longer: EE time (and the IOP's, which
-    // streams the ADX music) must still catch up with all of it, or the stream starves the SPU2.
+    // EE time follows real time over the whole run, not frame by frame: a frame that accounts more cycles than it took
+    // (spinning on the GS) leaves a lead the next frames use up, or the IOP runs ahead and the SPU2 drops what it mixes.
+    // The FramePacer's step stops at 0.1 s, but a load stalls a frame for longer: a deficit is charged up to a second.
     double nativeFrameEnd(PS2Runtime *runtime)
     {
         EeScheduler &scheduler = runtime->eeScheduler();
         runtime->framePacer().frameEnd();
-        const double step = std::min(hostFrameStep(), 1.0);
-        const uint64_t real = static_cast<uint64_t>(step * static_cast<double>(EeScheduler::kEeClockHz));
-        const uint64_t accounted = scheduler.currentCycle() - g_frameEndCycle;
-        for (uint64_t debt = real > accounted ? real - accounted : 0u; debt != 0u;)
+        const double step = hostFrameStep();
+        const int64_t real = static_cast<int64_t>(step * static_cast<double>(EeScheduler::kEeClockHz));
+        g_eeLead += static_cast<int64_t>(scheduler.currentCycle() - g_frameEndCycle) - real;
+        if (g_eeLead < 0)
         {
-            const uint32_t cycles = static_cast<uint32_t>(std::min<uint64_t>(debt, 1ull << 30));
-            scheduler.accountCycles(cycles);
-            debt -= cycles;
+            for (uint64_t debt = std::min<uint64_t>(static_cast<uint64_t>(-g_eeLead), EeScheduler::kEeClockHz); debt != 0u;)
+            {
+                const uint32_t cycles = static_cast<uint32_t>(std::min<uint64_t>(debt, 1ull << 30));
+                scheduler.accountCycles(cycles);
+                debt -= cycles;
+            }
+            g_eeLead = 0;
         }
         g_frameEndCycle = scheduler.currentCycle();
         scheduler.presentGuestFrame();
-        return step;
+        return std::min(step, 1.0);
     }
 
     // The main loop (0x12db20) ends its frame with an inline Timer 3 wait on 0x148098 until the lines elapsed since
@@ -1188,6 +1195,7 @@ namespace
             if (scheduler.nativeFrames() && !wasNative)
             {
                 g_frameEndCycle = scheduler.currentCycle();
+                g_eeLead = 0;
                 hostFrameStep();
             }
             const double step = scheduler.nativeFrames() ? nativeFrameEnd(runtime) : hostFrameStep();
