@@ -80,7 +80,12 @@ sets up the following.
   vblank grid: 59.56 fps against 58.22, game frames 59.65 per second (slowest 5 s 57.6) against 56.67 (46.3 in the
   character select and the stage load), 5 frames over 25 ms against 592, 21 empty ADX halves against 94 (8 to 94
   across runs). `PS2X_FRAME_CAP=0`: 90.3 GS frames and 112.5 game frames per second. The frame end sleeps on the EE
-  thread (the game's own wait was a spin, so no other guest thread ran there either).
+  thread (the game's own wait was a spin, so no other guest thread ran there either). `SC3_FRAME_SLEEP=1` sleeps
+  the main thread instead (PS2Recomp `EeScheduler::waitHostDeadline`, the JC2 frame end) while the other guest
+  threads run. Regress route, same build, back to back: 59.80 fps against 59.89, 6 frames over 25 ms against 10,
+  9 empty ADX halves against 28, but EE time ran up to 2.8 s ahead of real time in the menus (18 ms without), since
+  an idle EE skips from event to event while the main thread sleeps; uncapped 71.6 fps against 74.8 and 95 frames
+  over 25 ms against 38 (that machine was busy: 90 fps uncapped when idle). So it stays off.
 - **IRX modules recompiled** (`PS2X_IOP_NATIVE=1`, set by the override unless already set; `=0` interprets them).
   `scripts/iop_recomp.sh` boots with `PS2X_IOP_DUMP_MODULES` and runs PS2Recomp's `tools/iop_recomp.py` on each
   module into `generated/iop/`: CRI_ADXI 302 functions, MCMAN 202, PADMAN 136, LIBSD 59, SIO2MAN 49, NUSOUND 28,
@@ -188,6 +193,8 @@ thread spending most of its time decoding textures on the CPU (`TextureCache::de
   (two VU1 runs' pause stills: 13 dB). `REGRESS_SHOT_SECS=1 REGRESS_KEEP_SHOTS=1` keeps a capture a second.
 - `SC3_TRACE_FRAMES=1`: every 5 s, the main loop's frames per second, the frames over 25 ms, the longest, EE time's
   lead over real time and the vsync count; each frame over 50 ms on its own.
+- `SC3_FRAME_SLEEP=1`: native frames end on `EeScheduler::waitHostDeadline` (other guest threads run while the
+  main thread waits) instead of holding the EE thread in the FramePacer.
 - `PS2X_SC3_TRACE_GSIRQ=<n>` (`_VSYNC`, `_SPAN`): CSR, SIGLBLID and the VIF1/GIF chain addresses at the GS
   interrupt handler 0x10E658.
 - `PS2X_SC3_TRACE_ADXT`, `PS2X_SC3_TRACE_ADXF`: ADX player status changes, AFS partition loading.

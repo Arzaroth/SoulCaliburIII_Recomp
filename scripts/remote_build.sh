@@ -52,6 +52,7 @@ args=$(printf '%q ' "$RDIR" "$NAME" "$BUILD_TYPE" "$FLAGS" "$TOOLS" "${REMOTE_JO
     "${REMOTE_CXX:-}")
 ssh "$HOST" "bash -s -- $args" <<'EOF'
 set -euo pipefail
+export MISE_EXPERIMENTAL=1
 ffmpeg=$HOME/$1/ffmpeg
 work=$HOME/$1/$2
 read -ra tools <<< "$5"
@@ -69,6 +70,7 @@ if [ ! -f "$work/build/CMakeCache.txt" ]; then
     compiler=(-DCMAKE_C_COMPILER="$cc" -DCMAKE_CXX_COMPILER="$cxx")
 fi
 export PKG_CONFIG_PATH=$ffmpeg/lib/pkgconfig
+MISE_JOBS=1 mise install "${tools[@]}"
 cmake=(mise exec "${tools[@]}" -- cmake)
 "${cmake[@]}" -S "$work/src" -B "$work/build" -G Ninja -DCMAKE_BUILD_TYPE="$3" -DPS2X_BUILD_STUDIO=OFF \
     -DCMAKE_C_FLAGS="$flags" -DCMAKE_CXX_FLAGS="$flags" -DCMAKE_EXE_LINKER_FLAGS="$ldflags" -DCMAKE_SKIP_RPATH=ON \
