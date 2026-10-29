@@ -1214,7 +1214,7 @@ namespace
             if (g_elapsedLines)
                 runtime.registerFunction(kElapsedLines, elapsedLinesTraced);
         }
-        if (const char *native = std::getenv("SC3_NATIVE_FRAMES"); native && native[0] == '1')
+        if (const char *native = std::getenv("SC3_NATIVE_FRAMES"); !native || native[0] != '0')
             g_nativeFrames = true;
         if (g_nativeFrames || std::getenv("SC3_TRACE_FRAMES"))
         {
