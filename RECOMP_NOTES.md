@@ -58,7 +58,9 @@ sets up the following.
   stream (CRI ADXI, AutoDMA on core 1, one 256-sample half ahead) gets each half's interrupt before the next half
   plays: regress route 17367 AutoDMA transfers (17353 on the IOP clock), 23 empty halves (24869 before the queue),
   58.24 fps. `PS2X_IOP_WALLCLOCK=1` is not the default: it costs about 5 fps in the regress route (53 against 58)
-  with or without the SPU2 on the wall clock.
+  with or without the SPU2 on the wall clock. The SPU2 stays within 512 samples of the IOP clock (PS2Recomp e749e57):
+  regress route 17355 transfers, 24 empty halves, 58.24 fps, 6918 frames of silence (`gap=`, mostly while loading)
+  in 189 s. SC3's movie soundtracks are host audio mixed into the output; the game never streams PCM on core 0.
 - **IRX modules recompiled** (`PS2X_IOP_NATIVE=1`, set by the override unless already set; `=0` interprets them).
   `scripts/iop_recomp.sh` boots with `PS2X_IOP_DUMP_MODULES` and runs PS2Recomp's `tools/iop_recomp.py` on each
   module into `generated/iop/`: CRI_ADXI 302 functions, MCMAN 202, PADMAN 136, LIBSD 59, SIO2MAN 49, NUSOUND 28,
