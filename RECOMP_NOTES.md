@@ -20,6 +20,9 @@ matched from its embedded database), then grew by hand:
     boot.
 - **Stubs.** libcdvd, libdma, libgraph, libpad and libmpeg entry points are bound to the runtime's handlers by
   name (`stubs`), so CD reads, DMA and pad I/O go through the HLE layer.
+- **The game's own `rand` (0x42D508) is recompiled, not stubbed.** The runtime's `rand` stub returned
+  `std::rand() & 0x7FFF`, while the game's newlib code scales its results by RAND_MAX 0x7FFFFFFF, so every random
+  pick came out 0. The recompiled `rand` follows the game's own `srand`.
 - **`[mmio]` and `[jump_tables]`** are the analyzer's, kept as generated.
 
 The recompiler emits one C++ file per function (about 12,900 with the entry stubs) and `register_functions.cpp`,
@@ -49,16 +52,18 @@ sets up the following.
   GIF and VIF1 paths (the GS interrupt handler 0x10E658 restarts both chains when both have signalled). Waiting
   out the modelled GS interrupt latency at each one cost about 20% (Free Training 22 -> 18 fps at the time) and
   the game draws correctly without the stall.
-- **Native GS renderer preferred** (`PS2Runtime::requestNativeGsRenderer`, then `GS::requestParallelRenderer`). The
-  GS stream becomes OpenGL draws (docs/native.md in PS2Recomp). Free Training: 58 fps against paraLLEl-GS's 60, with
-  vertical seams every 64 pixels and a softer picture. `PS2X_GS_RENDERER=parallel` or `cpu` keeps another path. The
-  GPU renderers keep fights at speed where the CPU rasterizer fell to ~20 fps under host load.
+- **Native GS renderer** (`PS2Runtime::requestNativeGsRenderer`). The GS stream becomes OpenGL draws (docs/native.md
+  in PS2Recomp). Free Training runs at 58 fps; the vertical seams every 64 pixels, the soft picture and the darkened
+  frame were GS back end bugs, fixed on PS2Recomp sc3/native-gs-seams (pixel centres, HIGHLIGHT alpha, Ad blending,
+  the Z buffer a draw's ZBUF names). `PS2X_GS_RENDERER=cpu` draws with the CPU reference instead.
 - **SPU2 on the wall clock by default** (`PS2X_SPU2_WALLCLOCK=1` in scripts/run.sh, regress.sh and sc3run.sh;
   `=0` keeps the stretched IOP-clock output). The IOP mixes into a queue the audio callback takes from, so SC3's ADX
   stream (CRI ADXI, AutoDMA on core 1, one 256-sample half ahead) gets each half's interrupt before the next half
   plays: regress route 17367 AutoDMA transfers (17353 on the IOP clock), 23 empty halves (24869 before the queue),
   58.24 fps. `PS2X_IOP_WALLCLOCK=1` is not the default: it costs about 5 fps in the regress route (53 against 58)
-  with or without the SPU2 on the wall clock.
+  with or without the SPU2 on the wall clock. The SPU2 stays within 512 samples of the IOP clock (PS2Recomp e749e57):
+  regress route 17355 transfers, 24 empty halves, 58.24 fps, 6918 frames of silence (`gap=`, mostly while loading)
+  in 189 s. SC3's movie soundtracks are host audio mixed into the output; the game never streams PCM on core 0.
 - **IRX modules recompiled** (`PS2X_IOP_NATIVE=1`, set by the override unless already set; `=0` interprets them).
   `scripts/iop_recomp.sh` boots with `PS2X_IOP_DUMP_MODULES` and runs PS2Recomp's `tools/iop_recomp.py` on each
   module into `generated/iop/`: CRI_ADXI 302 functions, MCMAN 202, PADMAN 136, LIBSD 59, SIO2MAN 49, NUSOUND 28,
@@ -219,7 +224,7 @@ F3 overlay.
 
 ## Status
 
-Every mode has been played through with scripted input on the GPU renderer: Tales of Souls to the credits and the
+Every mode has been played through with scripted input: Tales of Souls to the credits and the
 first save, Chronicles of the Sword (story, editor, briefing, field map, battles, results), World Competition, Soul
 Arena, Museum, Character Creation, Shop and Options, with saves loaded back after a restart. Movies play with
 sound and skip with Start.
@@ -241,7 +246,13 @@ Open:
   movies on).
 - The root cause of the ordering-table double link behind the old menu-transition freeze was never found: it no
   longer reproduces since catch-up is off and the GS/CD timing fixes, but other timings may bring it back.
-- Not reached yet: widescreen and higher internal resolution.
+- Not reached yet: widescreen, and the frame loop on PS2Recomp's FramePacer (the vblank grid still paces frames).
+
+The port runs on the native target the other ports use, through PS2Recomp's `sc3/native` integration branch: the
+native GS renderer (`GSNativeBackend`, OpenGL) with the SC3 fixes for pixel centres and the 64-pixel seams, HIGHLIGHT
+alpha, Ad blending and the Z buffer a draw's ZBUF names (shadows); the SPU2 on the wall clock, kept within 512
+samples of the IOP clock; the eight IRX modules recompiled (813 functions, `scripts/iop_recomp.sh`). The regression
+route runs at 58.2 fps, and at 58.1 fps with `PS2X_GS_SCALE=2` (1280x896).
 
 ## Debugging recipes
 
