@@ -59,6 +59,11 @@ sets up the following.
   plays: regress route 17367 AutoDMA transfers (17353 on the IOP clock), 23 empty halves (24869 before the queue),
   58.24 fps. `PS2X_IOP_WALLCLOCK=1` is not the default: it costs about 5 fps in the regress route (53 against 58)
   with or without the SPU2 on the wall clock.
+- **IRX modules recompiled** (`PS2X_IOP_NATIVE=1`, set by the override unless already set; `=0` interprets them).
+  `scripts/iop_recomp.sh` boots with `PS2X_IOP_DUMP_MODULES` and runs PS2Recomp's `tools/iop_recomp.py` on each
+  module into `generated/iop/`: CRI_ADXI 302 functions, MCMAN 202, PADMAN 136, LIBSD 59, SIO2MAN 49, NUSOUND 28,
+  MCSERV 24, SDRDRV 13, none left to the interpreter. Regress route on par with the interpreter: 58.20 fps, 17362
+  AutoDMA transfers, 14 empty halves (interpreted: 58.13 fps, 17364, 17).
 - **VIF1 worker with the GS lag** (`setVif1Threaded(true)`, `setGsLag(true)`). VU1 took about 42% of the game
   thread in fights. VIF1 and the VU1 microcode now run on a worker that runs ahead of the EE on its own EE-cycle
   clock; the EE blocks only when it reaches a point past the busy worker's clock, and GS events raised by worker

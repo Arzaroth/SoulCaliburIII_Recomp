@@ -66,7 +66,7 @@ disc files ──► Ghidra (headless, EE) + ps2_analyzer + recomp/*_hints.txt �
              VU1/VU0 microcode in the ELF ──► ps2_vu_aot ──► C++ (generated/vu1/)
                                            │
    PS2Recomp runtime: EE kernel HLE · DMAC · GIF/GS · VIF/VU0/VU1 ─┼─► ps2EntryRunner
-   PS2Recomp IOP:     R3000A interpreter running the game's own IRX · SPU2 · SIO2
+   PS2Recomp IOP:     the game's own IRX, recompiled (generated/iop/) or interpreted · SPU2 · SIO2
 ```
 
 - The ELF has no symbols. Ghidra maps the functions; `scripts/find_code_pointers.py` adds those reached only through
@@ -106,6 +106,7 @@ scripts/extract_iso.sh "/path/to/Soulcalibur III (USA).iso"   # disc files -> ga
 scripts/build_tools.sh                                         # ps2_recomp, ps2_analyzer, ps2_vu_aot -> build/tools
 scripts/recomp.sh                                              # SLUS_212.16 + recomp/sc3.toml -> generated/, VU microcode -> generated/vu1/
 scripts/build_runtime.sh                                       # runtime + generated code -> build/game (RelWithDebInfo)
+scripts/iop_recomp.sh && scripts/build_runtime.sh             # optional: the IRX modules as native code -> generated/iop/
 scripts/run.sh                                                 # ps2EntryRunner game/SLUS_212.16
 ```
 
