@@ -19,6 +19,9 @@
 #   REGRESS_HANG_SECS   default 20
 #   REGRESS_FIGHT_SECS  length of the fight (default 60)
 #   REGRESS_PAUSE_SECS  presented-frame dumps (one a second) to wait in the pause menu before pause.png (default 3)
+#   REGRESS_PAUSE_HIDE="A:0x10 B:0x1388 ..."
+#                     in the pause menu, one still per entry with that VU1 program hidden (SC3_NATIVE_VU1_HIDE), as
+#                     pause_hide_<entry>.png, and pause_hide.txt: each one's imgdiff against pause.png
 #   SC3_ELF             game ELF (default: game/SLUS_212.16 of this repo)
 #   PS2X_SPU2_WALLCLOCK default 1, as scripts/run.sh
 set -euo pipefail
@@ -53,9 +56,15 @@ frames=$out/frames
 shots=$out/shots
 log=$out/run.log
 input=$out/pad_input.txt
-rm -rf "$frames" "$shots" "$out"/last_frame.* "$out"/pause*.png "$out/summary.txt" "$out/details.txt" "$out/errors.txt" "$out/pad.txt"
+rm -rf "$frames" "$shots" "$out"/last_frame.* "$out"/pause*.png "$out"/pause_hide.txt "$out/summary.txt" "$out/details.txt" "$out/errors.txt" "$out/pad.txt"
 mkdir -p "$frames" "$shots"
 : > "$input"
+hide_file=
+if [ -n "${REGRESS_PAUSE_HIDE:-}" ]; then
+    hide_file=$out/native_vu1.hide
+    : > "$hide_file"
+    export SC3_NATIVE_VU1_HIDE="@$hide_file"
+fi
 : > "$log"
 
 pid=
@@ -147,6 +156,15 @@ route()
     done
     press START; await "$pause_secs" || return 1
     pause_still pause.png
+    if [ -n "$hide_file" ]; then
+        local entry
+        for entry in $REGRESS_PAUSE_HIDE; do
+            echo "$entry" > "$hide_file"
+            await "$pause_secs" || return 1
+            pause_still "pause_hide_$(echo "$entry" | tr ':*' '__').png"
+        done
+        : > "$hide_file"
+    fi
     route_reached=1
 }
 
@@ -204,6 +222,13 @@ underruns=$(grep -ao '^\[spu2:stats\].* underruns [0-9]*' "$log" | tail -1 | awk
 adma_underruns=$(grep -ao '^\[state\] *\[SPU2\] samples=.*underruns [0-9]*' "$log" | tail -1 | awk '{ print $NF }' || true)
 grep -a -v '^\[state\]' "$log" | grep -a -i -E "$errors" \
     | sed -E 's/0x[0-9a-fA-F]+/X/g; s/[0-9]+/N/g' | sort | uniq -c | sort -rn > "$out/errors.txt" || true
+if [ -n "$hide_file" ]; then
+    for entry in $REGRESS_PAUSE_HIDE; do
+        still=pause_hide_$(echo "$entry" | tr ':*' '__').png
+        [ -f "$out/$still" ] || continue
+        echo "$entry $(python3 -I "$root/scripts/imgdiff.py" "$out/pause.png" "$out/$still" --diff "$out/${still%.png}_diff.png")"
+    done > "$out/pause_hide.txt"
+fi
 error_lines=$(grep -a -v '^\[state\]' "$log" | grep -a -c -i -E "$errors" || true)
 warning_lines=$(grep -a -v '^\[state\]' "$log" | grep -a -c -i 'warn' || true)
 
