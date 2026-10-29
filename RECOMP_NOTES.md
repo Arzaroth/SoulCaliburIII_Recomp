@@ -276,7 +276,8 @@ Open:
 
 The port runs on the native target the other ports use, through PS2Recomp's `sc3/native` integration branch: the
 native GS renderer (`GSNativeBackend`, OpenGL) with the SC3 fixes for pixel centres and the 64-pixel seams, HIGHLIGHT
-alpha, Ad blending and the Z buffer a draw's ZBUF names (shadows); the SPU2 on the wall clock, kept within 512
+alpha, Ad blending, the Z buffer a draw's ZBUF names, and the character shadows (COLCLAMP off wraps blends, a colour
+buffer read as Z keeps the Z block order, untextured draws at their own colour); the SPU2 on the wall clock, kept within 512
 samples of the IOP clock; the eight IRX modules recompiled (813 functions, `scripts/iop_recomp.sh`). The regression
 route runs at 58.2 fps, and at 58.1 fps with `PS2X_GS_SCALE=2` (1280x896).
 

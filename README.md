@@ -63,10 +63,12 @@ The port runs on the native target the other PS2Recomp ports use. It pins PS2Rec
 branch: `native/renderer` plus the SC3 fixes below, on their way into `native/renderer`.
 
 - **Native GS renderer**: PS2Recomp's GS back end translates the GS stream into OpenGL draws (`GSNativeBackend`),
-  with no GS emulation. SC3 needed four
+  with no GS emulation. SC3 needed these
   fixes in it: pixels sampled at their integer coordinates as the GS does (a one-pixel seam every 64 pixels and a
   soft picture before), HIGHLIGHT and HIGHLIGHT2 adding the vertex alpha at its own scale, blending with Ad at the
-  GS's scale, and draws testing against the Z buffer their ZBUF names (the shadow pass darkened the whole frame).
+  GS's scale, draws testing against the Z buffer their ZBUF names (the shadow pass darkened the whole frame), and
+  for the character shadows: blends with COLCLAMP off keeping the low 8 bits (the shadow volumes count by wrapping
+  past white), a colour buffer read as Z in the Z format's block order, and untextured draws at their own colour.
 - **Higher internal resolution**: `PS2X_GS_SCALE=2` draws at 1280x896. The screenshots above come from it.
 - **IOP modules recompiled**: `scripts/iop_recomp.sh` turns the eight IRX modules into native code (813 functions,
   none left to the interpreter); `PS2X_IOP_NATIVE=0` interprets them again.
