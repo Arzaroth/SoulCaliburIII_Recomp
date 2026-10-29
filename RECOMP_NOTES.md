@@ -53,9 +53,12 @@ sets up the following.
   GS stream becomes OpenGL draws (docs/native.md in PS2Recomp). Free Training: 58 fps against paraLLEl-GS's 60, with
   vertical seams every 64 pixels and a softer picture. `PS2X_GS_RENDERER=parallel` or `cpu` keeps another path. The
   GPU renderers keep fights at speed where the CPU rasterizer fell to ~20 fps under host load.
-- **SPU2 not on the wall clock yet.** With `PS2X_SPU2_WALLCLOCK=1` the host's audio callback mixes 1024 frames at a
-  time while SC3's ADX stream (CRI ADXI, AutoDMA on core 1) keeps one 256-sample half ahead: about 135 input halves
-  a second are found empty (`spu2_adma_underruns` in regress.sh), the stream gets 57% of its data.
+- **SPU2 on the wall clock by default** (`PS2X_SPU2_WALLCLOCK=1` in scripts/run.sh, regress.sh and sc3run.sh;
+  `=0` keeps the stretched IOP-clock output). The IOP mixes into a queue the audio callback takes from, so SC3's ADX
+  stream (CRI ADXI, AutoDMA on core 1, one 256-sample half ahead) gets each half's interrupt before the next half
+  plays: regress route 17367 AutoDMA transfers (17353 on the IOP clock), 23 empty halves (24869 before the queue),
+  58.24 fps. `PS2X_IOP_WALLCLOCK=1` is not the default: it costs about 5 fps in the regress route (53 against 58)
+  with or without the SPU2 on the wall clock.
 - **VIF1 worker with the GS lag** (`setVif1Threaded(true)`, `setGsLag(true)`). VU1 took about 42% of the game
   thread in fights. VIF1 and the VU1 microcode now run on a worker that runs ahead of the EE on its own EE-cycle
   clock; the EE blocks only when it reaches a point past the busy worker's clock, and GS events raised by worker
