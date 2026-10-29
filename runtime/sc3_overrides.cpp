@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdlib>
 #include <cstring>
@@ -1078,6 +1079,55 @@ namespace
         g_autoWinIrq(rdram, ctx, runtime);
     }
 
+    constexpr uint32_t kFrameEndReturn = 0x0012EA90u;
+    PS2Runtime::RecompiledFunction g_frameEndElapsedLines = nullptr;
+
+    struct FrameTrace
+    {
+        uint32_t frames = 0;
+        uint32_t over25ms = 0;
+        double seconds = 0.0;
+        double longest = 0.0;
+    };
+
+    FrameTrace g_frameTrace;
+
+    void traceFrame(PS2Runtime *runtime, double step)
+    {
+        FrameTrace &trace = g_frameTrace;
+        ++trace.frames;
+        trace.seconds += step;
+        trace.longest = std::max(trace.longest, step);
+        trace.over25ms += step > 0.025 ? 1u : 0u;
+        if (step > 0.05)
+            std::cerr << "[sc3] long frame " << step * 1000.0 << " ms, vsync " << runtime->eeScheduler().currentVSyncTick()
+                      << " ee cycle " << runtime->eeScheduler().currentCycle() << std::endl;
+        if (trace.seconds < 5.0)
+            return;
+        std::cerr << "[sc3] frames: " << trace.frames / trace.seconds << " fps, over 25 ms " << trace.over25ms
+                  << ", longest " << trace.longest * 1000.0 << " ms, vsync " << runtime->eeScheduler().currentVSyncTick() << std::endl;
+        trace = FrameTrace{};
+    }
+
+    double hostFrameStep()
+    {
+        using Clock = std::chrono::steady_clock;
+        static Clock::time_point previous = Clock::now();
+        const Clock::time_point now = Clock::now();
+        const double step = std::chrono::duration<double>(now - previous).count();
+        previous = now;
+        return step;
+    }
+
+    // The main loop (0x12db20) ends its frame with an inline Timer 3 wait on 0x148098, then calls it once more to
+    // record the frame's length.
+    void frameEndElapsedLines(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (getRegU32(ctx, 31) == kFrameEndReturn)
+            traceFrame(runtime, hostFrameStep());
+        g_frameEndElapsedLines(rdram, ctx, runtime);
+    }
+
     void applySoulcalibur3(PS2Runtime &runtime)
     {
         // The IRX modules recompiled by scripts/iop_recomp.sh; PS2X_IOP_NATIVE=0 interprets them.
@@ -1094,6 +1144,12 @@ namespace
             g_elapsedLines = runtime.lookupFunction(kElapsedLines);
             if (g_elapsedLines)
                 runtime.registerFunction(kElapsedLines, elapsedLinesTraced);
+        }
+        if (std::getenv("SC3_TRACE_FRAMES"))
+        {
+            g_frameEndElapsedLines = runtime.lookupFunction(kElapsedLines);
+            if (g_frameEndElapsedLines)
+                runtime.registerFunction(kElapsedLines, frameEndElapsedLines);
         }
         if (const char *trace = std::getenv("PS2X_SC3_TRACE_GSIRQ"); trace && *trace)
         {
