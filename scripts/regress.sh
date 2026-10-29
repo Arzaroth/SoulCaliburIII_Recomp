@@ -19,6 +19,9 @@
 #   REGRESS_HANG_SECS   default 20
 #   REGRESS_FIGHT_SECS  length of the fight (default 60)
 #   REGRESS_PAUSE_SECS  presented-frame dumps (one a second) to wait in the pause menu before pause.png (default 3)
+#   REGRESS_SHOT_SECS   seconds between the captures in shots/ (default 5)
+#   REGRESS_KEEP_SHOTS=1
+#                     keeps shots/ (frame_<tenths of a second>.png), to compare effects between two runs
 #   REGRESS_NATIVE_VU1_AB=1
 #                     the run on VU1 with SC3_NATIVE_VU1=1 switched off (SC3_NATIVE_VU1_SWITCH); in the pause menu
 #                     pause_vu1.png a little after pause.png (pause_floor_psnr: how still the pause is), then the
@@ -38,6 +41,8 @@ elf=${SC3_ELF:-$root/game/SLUS_212.16}
 hang_secs=${REGRESS_HANG_SECS:-20}
 fight_secs=${REGRESS_FIGHT_SECS:-60}
 pause_secs=${REGRESS_PAUSE_SECS:-3}
+shot_secs=${REGRESS_SHOT_SECS:-5}
+keep_shots=${REGRESS_KEEP_SHOTS:-0}
 period=5
 
 runner=
@@ -88,7 +93,7 @@ start=$(date +%s)
     exec env DISPLAY="${DISPLAY:-:0}" WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}" PS2X_DEBUG_UI=0 \
         PS2X_SPU2_STATS=1 PS2X_SC3_NO_MOVIES=1 PS2X_STATE_DUMP=$period \
         PS2X_FRAME_DUMP="$frames" PS2X_FRAME_DUMP_EVERY=1 \
-        PS2X_CAPTURE_DIR="$shots" PS2X_CAPTURE_INTERVAL=$period PS2X_PAD_INPUT="$input" \
+        PS2X_CAPTURE_DIR="$shots" PS2X_CAPTURE_INTERVAL=$shot_secs PS2X_PAD_INPUT="$input" \
         "$runner" "$elf"
 ) > "$log" 2>&1 &
 pid=$!
@@ -211,12 +216,13 @@ fi
 
 last=$(ls "$shots" | sort | tail -1)
 if [ -n "$last" ]; then
-    mv "$shots/$last" "$out/last_frame.png"
+    cp "$shots/$last" "$out/last_frame.png"
 else
     last=$(ls "$frames" | sort -t_ -k2 -n | tail -1)
     if [ -n "$last" ]; then mv "$frames/$last" "$out/last_frame.raw"; fi
 fi
-rm -rf "$frames" "$shots" "$input"
+rm -rf "$frames" "$input"
+[ "$keep_shots" = 1 ] || rm -rf "$shots"
 
 gs_samples() { grep -a '^\[state\] gs frames=' "$log" | sed 's/^\[state\] gs frames=\([0-9]*\).*/\1/'; }
 if [ -n "$fight_mark" ]; then
