@@ -143,6 +143,14 @@ files; a clean build of the tools and the game (recompile included) takes about 
 7800X3D, most of it the runner. `scripts/build_runtime.sh Release` or `Debug` picks another build type, and `CXX`
 another compiler (Clang is used when it is installed).
 
+`scripts/remote_build.sh` builds the runner on another x86-64 Linux machine over ssh (`REMOTE_HOST`, default
+`stallman`) and copies it back to `build/game`; the game still runs locally. It sends `CMakeLists.txt`, `runtime/`,
+`generated/` and `PS2Recomp/` with rsync and builds them with Clang 23 from mise (conda-forge) on the remote host's
+GCC headers, libstdc++ and linker, so the runner needs nothing newer than what the local machine has. The remote host
+needs rsync, mise and the X11 and OpenGL development headers, but not FFmpeg: the local FFmpeg headers and libraries
+are copied over once, so the runner links against the FFmpeg it runs with. On a 40-core Debian 12 host a clean runner
+build takes about 4 minutes of compiling and 6 minutes overall, and a rebuild with nothing changed about 15 seconds.
+
 `scripts/regress.sh build/game ~/sc3-regress` checks a build for regressions: it boots with movies off, goes through the
 menus into a Free Training fight, attacks for a minute, then writes a verdict to `summary.txt` (route reached, ok,
 hang or crash, GS frame rate, SPU2 underruns) with the last frame and the log.
