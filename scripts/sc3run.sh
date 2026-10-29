@@ -2,6 +2,7 @@
 # usage: sc3run.sh <name> <seconds> [extra env...]
 # Runs the game for that long with a state dump every 5 s, logs to $SC3_RUNS/<name>.log and screenshots the window.
 set -u
+export PS2X_SPU2_WALLCLOCK="${PS2X_SPU2_WALLCLOCK:-1}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 name=$1; secs=$2; shift 2
 runs=${SC3_RUNS:-$root/build/runs}

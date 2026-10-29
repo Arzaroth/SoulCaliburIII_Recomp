@@ -17,7 +17,9 @@
 #   REGRESS_HANG_SECS   default 20
 #   REGRESS_FIGHT_SECS  length of the fight (default 60)
 #   SC3_ELF             game ELF (default: game/SLUS_212.16 of this repo)
+#   PS2X_SPU2_WALLCLOCK default 1, as scripts/run.sh
 set -euo pipefail
+export PS2X_SPU2_WALLCLOCK="${PS2X_SPU2_WALLCLOCK:-1}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 [ $# -eq 2 ] || { echo "usage: $0 <build-dir> <out-dir>" >&2; exit 2; }
 target=$1
