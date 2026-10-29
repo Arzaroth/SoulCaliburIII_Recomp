@@ -1080,6 +1080,8 @@ namespace
 
     void applySoulcalibur3(PS2Runtime &runtime)
     {
+        // The IRX modules recompiled by scripts/iop_recomp.sh; PS2X_IOP_NATIVE=0 interprets them.
+        setenv("PS2X_IOP_NATIVE", "1", 0);
         if (std::getenv("PS2X_SC3_AUTOWIN"))
         {
             g_autoWinIrq = runtime.lookupFunction(kGsIrqHandler);
