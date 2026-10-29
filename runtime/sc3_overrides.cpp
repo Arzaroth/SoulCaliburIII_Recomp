@@ -84,6 +84,8 @@ namespace
             return m_active;
         }
 
+        bool loops() const { return m_loop; }
+
         void mix(int16_t *frames, size_t count)
         {
             std::lock_guard<std::mutex> lock(m_mutex);
@@ -743,7 +745,26 @@ namespace
     constexpr uint32_t kMwPlyStartAfsLp = 0x003B1698u;
     constexpr uint32_t kMovieAfsPartition = 1u;
 
-    void mwPlyStartSkipped(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+    bool g_nativeFrames = false;
+
+    // A one-shot movie (the opening, the intro, story scenes) plays in a loop of its own that ends no frame of the
+    // main loop: the game runs on the vblanks until it ends. Looping ones are menu and loading-screen backgrounds.
+    bool oneShotMoviePlaying()
+    {
+        for (const auto &player : g_movies.all())
+            if (!player->loops() && player->active())
+                return true;
+        return false;
+    }
+
+    void followMovies(PS2Runtime *runtime)
+    {
+        const bool native = g_nativeFrames && !oneShotMoviePlaying();
+        if (runtime->eeScheduler().nativeFrames() != native)
+            runtime->eeScheduler().setNativeFrames(native);
+    }
+
+    void mwPlyStartSkipped(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t a1 = getRegU32(ctx, 5);
         std::string name;
@@ -770,6 +791,7 @@ namespace
             if (afsEntry(path, getRegU32(ctx, 6), offset, size) && player->start(path, offset, size, ctx->pc == kMwPlyStartAfsLp))
             {
                 g_movies.set(handle, std::move(player));
+                followMovies(runtime);
                 std::cerr << "[sc3] movie file " << getRegU32(ctx, 6) << " at 0x" << std::hex << offset << " size 0x" << size << std::dec << std::endl;
             }
         }
@@ -1079,12 +1101,15 @@ namespace
         g_autoWinIrq(rdram, ctx, runtime);
     }
 
+    constexpr uint32_t kFrameLimiterWaitReturn = 0x0012EA10u;
     constexpr uint32_t kFrameEndReturn = 0x0012EA90u;
     PS2Runtime::RecompiledFunction g_frameEndElapsedLines = nullptr;
+    uint64_t g_frameEndCycle = 0;
 
     struct FrameTrace
     {
         uint32_t frames = 0;
+        uint32_t waitsSkipped = 0;
         uint32_t over25ms = 0;
         double seconds = 0.0;
         double longest = 0.0;
@@ -1105,7 +1130,8 @@ namespace
         if (trace.seconds < 5.0)
             return;
         std::cerr << "[sc3] frames: " << trace.frames / trace.seconds << " fps, over 25 ms " << trace.over25ms
-                  << ", longest " << trace.longest * 1000.0 << " ms, vsync " << runtime->eeScheduler().currentVSyncTick() << std::endl;
+                  << ", longest " << trace.longest * 1000.0 << " ms, limiter waits skipped " << trace.waitsSkipped
+                  << ", vsync " << runtime->eeScheduler().currentVSyncTick() << std::endl;
         trace = FrameTrace{};
     }
 
@@ -1119,12 +1145,55 @@ namespace
         return step;
     }
 
-    // The main loop (0x12db20) ends its frame with an inline Timer 3 wait on 0x148098, then calls it once more to
-    // record the frame's length.
+    // The FramePacer's step stops at 0.1 s, but a load stalls a frame for longer: EE time (and the IOP's, which
+    // streams the ADX music) must still catch up with all of it, or the stream starves the SPU2.
+    double nativeFrameEnd(PS2Runtime *runtime)
+    {
+        EeScheduler &scheduler = runtime->eeScheduler();
+        runtime->framePacer().frameEnd();
+        const double step = std::min(hostFrameStep(), 1.0);
+        const uint64_t real = static_cast<uint64_t>(step * static_cast<double>(EeScheduler::kEeClockHz));
+        const uint64_t accounted = scheduler.currentCycle() - g_frameEndCycle;
+        for (uint64_t debt = real > accounted ? real - accounted : 0u; debt != 0u;)
+        {
+            const uint32_t cycles = static_cast<uint32_t>(std::min<uint64_t>(debt, 1ull << 30));
+            scheduler.accountCycles(cycles);
+            debt -= cycles;
+        }
+        g_frameEndCycle = scheduler.currentCycle();
+        scheduler.presentGuestFrame();
+        return step;
+    }
+
+    // The main loop (0x12db20) ends its frame with an inline Timer 3 wait on 0x148098 until the lines elapsed since
+    // the last frame reach its target (sp+0x30), then calls it once more to record the frame's length.
     void frameEndElapsedLines(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
-        if (getRegU32(ctx, 31) == kFrameEndReturn)
-            traceFrame(runtime, hostFrameStep());
+        const uint32_t ra = getRegU32(ctx, 31);
+        if (ra == kFrameLimiterWaitReturn && runtime->eeScheduler().nativeFrames())
+        {
+            ++g_frameTrace.waitsSkipped;
+            uint32_t target = 0;
+            std::memcpy(&target, rdram + ((getRegU32(ctx, 29) + 0x30u) & PS2_RAM_MASK), sizeof(target));
+            setReturnS32(ctx, static_cast<int32_t>(target));
+            ctx->pc = ra;
+            return;
+        }
+        if (ra == kFrameEndReturn)
+        {
+            static const bool trace = std::getenv("SC3_TRACE_FRAMES") != nullptr;
+            EeScheduler &scheduler = runtime->eeScheduler();
+            const bool wasNative = scheduler.nativeFrames();
+            followMovies(runtime);
+            if (scheduler.nativeFrames() && !wasNative)
+            {
+                g_frameEndCycle = scheduler.currentCycle();
+                hostFrameStep();
+            }
+            const double step = scheduler.nativeFrames() ? nativeFrameEnd(runtime) : hostFrameStep();
+            if (trace)
+                traceFrame(runtime, step);
+        }
         g_frameEndElapsedLines(rdram, ctx, runtime);
     }
 
@@ -1145,11 +1214,21 @@ namespace
             if (g_elapsedLines)
                 runtime.registerFunction(kElapsedLines, elapsedLinesTraced);
         }
-        if (std::getenv("SC3_TRACE_FRAMES"))
+        if (const char *native = std::getenv("SC3_NATIVE_FRAMES"); native && native[0] == '1')
+            g_nativeFrames = true;
+        if (g_nativeFrames || std::getenv("SC3_TRACE_FRAMES"))
         {
             g_frameEndElapsedLines = runtime.lookupFunction(kElapsedLines);
             if (g_frameEndElapsedLines)
                 runtime.registerFunction(kElapsedLines, frameEndElapsedLines);
+            else
+                g_nativeFrames = false;
+        }
+        if (g_nativeFrames)
+        {
+            runtime.eeScheduler().setNativeFrames(true);
+            std::cerr << "[sc3] native frames: paced by the host (cap " << runtime.framePacer().cap()
+                      << " fps, 0 = unlimited)" << std::endl;
         }
         if (const char *trace = std::getenv("PS2X_SC3_TRACE_GSIRQ"); trace && *trace)
         {
