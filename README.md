@@ -31,8 +31,8 @@ Not an emulator: the game's own MIPS R5900 code, rebuilt as a native program on 
 ## Status
 
 **Playable from start to finish in automated tests, now in human testing.** The port runs on PS2Recomp's native
-target: the GS stream drawn with OpenGL, the IOP modules recompiled, the SPU2 on the wall clock. Fights run at about
-58 frames per second on a Ryzen 7 7800X3D, with music and voices. Every mode has been played through with scripted input: Tales
+target: the GS stream drawn with OpenGL, the IOP modules recompiled, the SPU2 on the wall clock, the frame loop on real time. Fights run at about
+60 frames per second on a Ryzen 7 7800X3D, with music and voices. Every mode has been played through with scripted input: Tales
 of Souls to the credits, Chronicles of the Sword battles on the field map, World Competition, Soul Arena, Museum,
 Character Creation, Shop and Options, with saves loaded back after a restart. The game runs its own `rand`: the
 15-bit stub it used to be bound to made every random pick 0.
@@ -52,7 +52,7 @@ Character Creation, Shop and Options, with saves loaded back after a restart. Th
 | Long play sessions by a human | 🔧 |
 | Native GS renderer (OpenGL), recompiled IOP modules, SPU2 on the wall clock | ✅ |
 | Higher internal resolution (`PS2X_GS_SCALE`) | ✅ |
-| Frame loop on the native FramePacer | 🔧 |
+| Frame loop on the native FramePacer | ✅ |
 | Widescreen | ⏳ |
 
 ✅ works · 🔧 in progress · ⏳ not reached yet
@@ -72,8 +72,11 @@ branch: `native/renderer` plus the SC3 fixes below, on their way into `native/re
   none left to the interpreter); `PS2X_IOP_NATIVE=0` interprets them again.
 - **SPU2 on the wall clock** by default (`PS2X_SPU2_WALLCLOCK=1` in the scripts), with an AutoDMA fix so the ADX
   stream gets each half's interrupt in time, and kept within 512 samples of the IOP clock.
-- **Speed**: the regression route runs at 58.2 fps at the native scale and 58.1 fps at `PS2X_GS_SCALE=2`; the frame
-  loop on PS2Recomp's FramePacer is in progress.
+- **Frame loop on real time** by default: the main loop's frames are paced by PS2Recomp's FramePacer and shown when
+  the game ends them, not on the vblank grid (`SC3_NATIVE_FRAMES=0` goes back to it). `PS2X_FRAME_CAP` sets the cap
+  (60 by default, 0 = unlimited).
+- **Speed**: the regression route runs at 59.6 fps (58.2 on the vblank grid), with 5 frames over 25 ms instead of
+  about 590; uncapped (`PS2X_FRAME_CAP=0`) it reaches 90 GS frames per second, 112 game frames per second.
 
 [RECOMP_NOTES.md](RECOMP_NOTES.md) records how the port was brought up, every fix and how it was found.
 

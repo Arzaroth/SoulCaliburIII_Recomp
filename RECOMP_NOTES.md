@@ -64,6 +64,23 @@ sets up the following.
   with or without the SPU2 on the wall clock. The SPU2 stays within 512 samples of the IOP clock (PS2Recomp e749e57):
   regress route 17355 transfers, 24 empty halves, 58.24 fps, 6918 frames of silence (`gap=`, mostly while loading)
   in 189 s. SC3's movie soundtracks are host audio mixed into the output; the game never streams PCM on core 0.
+- **Frame loop on real time** (`SC3_NATIVE_FRAMES`, on unless `=0`; PS2Recomp docs/native.md, layer 1). The main loop
+  (0x12DB20) ends each frame with an inline Timer 3 wait: 0x148098 (lines since the last frame) polled from 0x12EA08
+  until it reaches the target at sp+0x30, then called once more from 0x12EA88 to record the frame's length. The
+  override answers the polling call with the target at once, and at the recording call holds the frame to the
+  FramePacer's cap, charges the EE the real time the frame did not account and presents the frame
+  (`presentGuestFrame`). SC3 counts frames, so there is no time step to feed. EE time follows real time over the
+  run: a frame that accounts more than it took leaves a lead the next frames use up (otherwise the IOP runs ahead and
+  the SPU2 drops 44800 samples in the regress route), and a load's long frame is charged in full up to a second
+  (the pacer's step stops at 0.1 s, and the ADX stream starved). A one-shot movie plays in a loop of its own that
+  ends no main-loop frame, so the vblanks pace the game while one plays; looping menu and loading backgrounds do
+  not. Two PS2Recomp fixes came with it: under native frames an idle wait lasts the EE cycles to its event, not the
+  vblank timeline's lead (0.6 s stalls in the title-screen loads, sc3/native-frames-idle), and `PS2X_CAPTURE_DIR`
+  saves the frame's own width (movie frames came out 1280x448, sc3/native-movie-scale). Regress route against the
+  vblank grid: 59.56 fps against 58.22, game frames 59.65 per second (slowest 5 s 57.6) against 56.67 (46.3 in the
+  character select and the stage load), 5 frames over 25 ms against 592, 21 empty ADX halves against 94 (8 to 94
+  across runs). `PS2X_FRAME_CAP=0`: 90.3 GS frames and 112.5 game frames per second. The frame end sleeps on the EE
+  thread (the game's own wait was a spin, so no other guest thread ran there either).
 - **IRX modules recompiled** (`PS2X_IOP_NATIVE=1`, set by the override unless already set; `=0` interprets them).
   `scripts/iop_recomp.sh` boots with `PS2X_IOP_DUMP_MODULES` and runs PS2Recomp's `tools/iop_recomp.py` on each
   module into `generated/iop/`: CRI_ADXI 302 functions, MCMAN 202, PADMAN 136, LIBSD 59, SIO2MAN 49, NUSOUND 28,
@@ -113,6 +130,8 @@ Tales of Souls loading screen before the last episodes stayed on a white NOW LOA
   (state machines such as the Art Gallery task, state at +0x130).
 - `PS2X_SC3_RATE=<addr,...>`: calls per 60 vsyncs of each function.
 - `PS2X_SC3_TRACE_PACING` (`_ALL`, `_SPAN`, `_FULL`): the frame limiter's Timer3 waits (0x148098).
+- `SC3_TRACE_FRAMES=1`: every 5 s, the main loop's frames per second, the frames over 25 ms, the longest, EE time's
+  lead over real time and the vsync count; each frame over 50 ms on its own.
 - `PS2X_SC3_TRACE_GSIRQ=<n>` (`_VSYNC`, `_SPAN`): CSR, SIGLBLID and the VIF1/GIF chain addresses at the GS
   interrupt handler 0x10E658.
 - `PS2X_SC3_TRACE_ADXT`, `PS2X_SC3_TRACE_ADXF`: ADX player status changes, AFS partition loading.
@@ -246,7 +265,7 @@ Open:
   movies on).
 - The root cause of the ordering-table double link behind the old menu-transition freeze was never found: it no
   longer reproduces since catch-up is off and the GS/CD timing fixes, but other timings may bring it back.
-- Not reached yet: widescreen, and the frame loop on PS2Recomp's FramePacer (the vblank grid still paces frames).
+- Not reached yet: widescreen.
 
 The port runs on the native target the other ports use, through PS2Recomp's `sc3/native` integration branch: the
 native GS renderer (`GSNativeBackend`, OpenGL) with the SC3 fixes for pixel centres and the 64-pixel seams, HIGHLIGHT
