@@ -25,9 +25,6 @@ namespace sc3
 
         constexpr uint32_t kElapsedLines = 0x00148098u;
         constexpr uint32_t kFrameEndReturn = 0x0012EA90u;
-        constexpr uint32_t kPlayerHealth = 0x004D36A0u;
-        constexpr uint32_t kOpponentHealth = 0x004D36A4u;
-        constexpr float kFullHealth = 240.0f;
         constexpr size_t kCodeBytes = 16u * 1024u;
 
         struct KnownProgram
@@ -119,15 +116,6 @@ namespace sc3
                 return s.program = static_cast<uint32_t>(found - s.names.begin());
             s.names.emplace_back(name);
             return s.program = static_cast<uint32_t>(s.names.size() - 1u);
-        }
-
-        bool inFight()
-        {
-            float player = 0.0f, opponent = 0.0f;
-            std::memcpy(&player, g_state.rdram + kPlayerHealth, sizeof(player));
-            std::memcpy(&opponent, g_state.rdram + kOpponentHealth, sizeof(opponent));
-            auto alive = [](float health) { return health >= 0.5f && health <= kFullHealth; };
-            return alive(player) && alive(opponent);
         }
 
         Vu1StreamAdapter::Choice choose(Vu1StreamAdapter &adapter, uint32_t pc)
@@ -310,10 +298,10 @@ namespace sc3
         const char *gsWrites = std::getenv("SC3_NATIVE_VU1_GSWRITES");
         config.gsWrites = nativeGs && !(gsWrites && *gsWrites == '0');
         if (s.mode == Mode::Sandbox)
-            config.active = [] { return g_state.sandbox && inFight(); };
+            config.active = [] { return g_state.sandbox; };
         Vu1StreamAdapter::instance().install(config);
         std::cerr << "[sc3] native VU1: "
-                  << (s.mode == Mode::Sandbox ? "every program on the sandbox in fights" : "observed, every program on VU1")
+                  << (s.mode == Mode::Sandbox ? "every program on the sandbox" : "observed, every program on VU1")
                   << (s.hidden.empty() && s.hidePath.empty() ? "" : ", some hidden")
                   << (s.only.empty() ? "" : ", only some on the sandbox")
                   << (config.gsWrites ? ", drawn by the GS back end" : ", drawn by the native renderer") << std::endl;
