@@ -49,9 +49,13 @@ sets up the following.
   GIF and VIF1 paths (the GS interrupt handler 0x10E658 restarts both chains when both have signalled). Waiting
   out the modelled GS interrupt latency at each one cost about 20% (Free Training 22 -> 18 fps at the time) and
   the game draws correctly without the stall.
-- **paraLLEl-GS preferred** (`GS::requestParallelRenderer`). The GPU renderer keeps fights at speed where the CPU
-  rasterizer fell to ~20 fps under host load. `PS2X_GS_RENDERER=cpu` (or any other value) keeps the CPU path, and
-  the runtime falls back to it when no Vulkan device is found.
+- **Native GS renderer preferred** (`PS2Runtime::requestNativeGsRenderer`, then `GS::requestParallelRenderer`). The
+  GS stream becomes OpenGL draws (docs/native.md in PS2Recomp). Free Training: 58 fps against paraLLEl-GS's 60, with
+  vertical seams every 64 pixels and a softer picture. `PS2X_GS_RENDERER=parallel` or `cpu` keeps another path. The
+  GPU renderers keep fights at speed where the CPU rasterizer fell to ~20 fps under host load.
+- **SPU2 not on the wall clock yet.** With `PS2X_SPU2_WALLCLOCK=1` the host's audio callback mixes 1024 frames at a
+  time while SC3's ADX stream (CRI ADXI, AutoDMA on core 1) keeps one 256-sample half ahead: about 135 input halves
+  a second are found empty (`spu2_adma_underruns` in regress.sh), the stream gets 57% of its data.
 - **VIF1 worker with the GS lag** (`setVif1Threaded(true)`, `setGsLag(true)`). VU1 took about 42% of the game
   thread in fights. VIF1 and the VU1 microcode now run on a worker that runs ahead of the EE on its own EE-cycle
   clock; the EE blocks only when it reaches a point past the busy worker's clock, and GS events raised by worker

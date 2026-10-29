@@ -73,8 +73,9 @@ disc files ──► Ghidra (headless, EE) + ps2_analyzer + recomp/*_hints.txt �
   pointers, jump tables or tail calls (the hint lists in `recomp/`).
 - PS2Recomp turns every function into C++. `ps2_vu_aot` finds the VU1 and VU0 microprograms in the ELF and compiles
   them ahead of time; VU1 runs on its own thread ahead of the game, syncing only when the game reads VU1 state.
-- The GS is drawn on the GPU by [paraLLEl-GS](https://github.com/Arntzen-Software/parallel-gs) (Vulkan compute), with
-  the CPU rasterizer as fallback.
+- The GS stream is translated into OpenGL draws by PS2Recomp's native GS back end (`PS2X_GS_RENDERER=native`, the
+  default), with [paraLLEl-GS](https://github.com/Arntzen-Software/parallel-gs) (Vulkan compute) and the CPU
+  rasterizer as fallbacks.
 - `runtime/sc3_overrides.cpp` holds the game-specific bindings: reserved memory, a host Sofdec movie player and
   mixer, the renderer and timing choices, and diagnostic tracers.
 
@@ -140,7 +141,7 @@ player 2:
 
 | Variable | Effect |
 |---|---|
-| `PS2X_GS_RENDERER=cpu` | Draw with the CPU rasterizer. The default is the GPU (paraLLEl-GS, Vulkan), which falls back to the CPU when no Vulkan device is found |
+| `PS2X_GS_RENDERER=parallel` or `cpu` | Draw with paraLLEl-GS (Vulkan) or the CPU rasterizer. The default is the native GS back end (OpenGL); without it paraLLEl-GS, which falls back to the CPU when no Vulkan device is found |
 | `PS2X_VIF1_THREAD=0` | Run VIF1 and the VU1 microcode on the game thread (default: their own thread, about a third faster in fights) |
 | `PS2X_EE_CATCHUP=0\|field\|1` | Wall-clock catch-up: SC3 defaults to off, so emulated time never runs faster than real time |
 | `PS2X_SC3_NO_MOVIES=1` | Skip the one-shot movies (for tests) |
