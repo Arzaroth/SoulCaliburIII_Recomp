@@ -34,9 +34,20 @@ if(SC3_VU1_SOURCES)
     target_sources(ps2EntryRunner PRIVATE $<TARGET_OBJECTS:sc3_vu1_aot>)
 endif()
 
+# The game's IRX modules recompiled by PS2Recomp's tools/iop_recomp.py (scripts/iop_recomp.sh), run with PS2X_IOP_NATIVE=1.
+file(GLOB SC3_IOP_SOURCES CONFIGURE_DEPENDS "${SC3_GENERATED_DIR}/iop/*.cpp")
+if(SC3_IOP_SOURCES)
+    add_library(sc3_iop_native OBJECT ${SC3_IOP_SOURCES})
+    target_link_libraries(sc3_iop_native PRIVATE ps2_iop)
+    set_target_properties(sc3_iop_native PROPERTIES UNITY_BUILD OFF)
+    target_compile_options(sc3_iop_native PRIVATE -O2 -g0)
+    target_sources(ps2EntryRunner PRIVATE $<TARGET_OBJECTS:sc3_iop_native>)
+endif()
+
 target_sources(ps2EntryRunner PRIVATE ${SC3_GENERATED_SOURCES} ${SC3_RUNTIME_SOURCES})
 target_include_directories(ps2EntryRunner PRIVATE "${SC3_GENERATED_DIR}")
 
 list(LENGTH SC3_GENERATED_SOURCES _sc3_count)
 list(LENGTH SC3_VU1_SOURCES _sc3_vu1_count)
-message(STATUS "SoulCaliburIII_Recomp: ${_sc3_count} generated sources, ${_sc3_vu1_count} compiled VU1 file(s)")
+list(LENGTH SC3_IOP_SOURCES _sc3_iop_count)
+message(STATUS "SoulCaliburIII_Recomp: ${_sc3_count} generated sources, ${_sc3_vu1_count} compiled VU1 file(s), ${_sc3_iop_count} recompiled IOP module(s)")

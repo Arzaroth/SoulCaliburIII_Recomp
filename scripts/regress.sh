@@ -11,10 +11,15 @@
 #   gs_frames_*, fps_mean, frames_presented
 #                     GS FINISH frames from the 5 s state dump, over the fight once reached, else over the run;
 #                     fps_p10 and frames_over_25ms are NA: the runtime logs no per-frame present times
+#   spu2_underruns    host stream underruns from PS2X_SPU2_STATS, NA when the SPU2 runs on the wall clock (no stats)
+#   spu2_adma_underruns
+#                     AutoDMA input halves the SPU2 found empty while the game streams (ADX), from the state dump
 #   REGRESS_HANG_SECS   default 20
 #   REGRESS_FIGHT_SECS  length of the fight (default 60)
 #   SC3_ELF             game ELF (default: game/SLUS_212.16 of this repo)
+#   PS2X_SPU2_WALLCLOCK default 1, as scripts/run.sh
 set -euo pipefail
+export PS2X_SPU2_WALLCLOCK="${PS2X_SPU2_WALLCLOCK:-1}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 [ $# -eq 2 ] || { echo "usage: $0 <build-dir> <out-dir>" >&2; exit 2; }
 target=$1
@@ -181,7 +186,8 @@ read -r median minimum mean count < <(echo "$samples" | sort -n | awk -v p=$peri
 frames_presented=$(gs_samples | awk '{ s += $1 } END { print NR ? s : "NA" }')
 
 errors='error|fatal|abort|exception|unimplemented|unhandled|invalid|crash|assert'
-underruns=$(grep -ao '^\[spu2:stats\].* underruns [0-9]*' "$log" | tail -1 | awk '{ print $NF }')
+underruns=$(grep -ao '^\[spu2:stats\].* underruns [0-9]*' "$log" | tail -1 | awk '{ print $NF }' || true)
+adma_underruns=$(grep -ao '^\[state\] *\[SPU2\] samples=.*underruns [0-9]*' "$log" | tail -1 | awk '{ print $NF }' || true)
 grep -a -v '^\[state\]' "$log" | grep -a -i -E "$errors" \
     | sed -E 's/0x[0-9a-fA-F]+/X/g; s/[0-9]+/N/g' | sort | uniq -c | sort -rn > "$out/errors.txt" || true
 error_lines=$(grep -a -v '^\[state\]' "$log" | grep -a -c -i -E "$errors" || true)
@@ -200,6 +206,7 @@ frames_over_25ms=NA
 gs_frames_per_5s_median=$median
 gs_frames_per_5s_min=$minimum
 spu2_underruns=${underruns:-NA}
+spu2_adma_underruns=${adma_underruns:-NA}
 error_lines=$error_lines
 warning_lines=$warning_lines
 EOF

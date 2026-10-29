@@ -52,9 +52,23 @@ sets up the following.
   GIF and VIF1 paths (the GS interrupt handler 0x10E658 restarts both chains when both have signalled). Waiting
   out the modelled GS interrupt latency at each one cost about 20% (Free Training 22 -> 18 fps at the time) and
   the game draws correctly without the stall.
-- **paraLLEl-GS preferred** (`GS::requestParallelRenderer`). The GPU renderer keeps fights at speed where the CPU
-  rasterizer fell to ~20 fps under host load. `PS2X_GS_RENDERER=cpu` (or any other value) keeps the CPU path, and
-  the runtime falls back to it when no Vulkan device is found.
+- **Native GS renderer preferred** (`PS2Runtime::requestNativeGsRenderer`, then `GS::requestParallelRenderer`). The
+  GS stream becomes OpenGL draws (docs/native.md in PS2Recomp). Free Training: 58 fps against paraLLEl-GS's 60, with
+  vertical seams every 64 pixels and a softer picture. `PS2X_GS_RENDERER=parallel` or `cpu` keeps another path. The
+  GPU renderers keep fights at speed where the CPU rasterizer fell to ~20 fps under host load.
+- **SPU2 on the wall clock by default** (`PS2X_SPU2_WALLCLOCK=1` in scripts/run.sh, regress.sh and sc3run.sh;
+  `=0` keeps the stretched IOP-clock output). The IOP mixes into a queue the audio callback takes from, so SC3's ADX
+  stream (CRI ADXI, AutoDMA on core 1, one 256-sample half ahead) gets each half's interrupt before the next half
+  plays: regress route 17367 AutoDMA transfers (17353 on the IOP clock), 23 empty halves (24869 before the queue),
+  58.24 fps. `PS2X_IOP_WALLCLOCK=1` is not the default: it costs about 5 fps in the regress route (53 against 58)
+  with or without the SPU2 on the wall clock. The SPU2 stays within 512 samples of the IOP clock (PS2Recomp e749e57):
+  regress route 17355 transfers, 24 empty halves, 58.24 fps, 6918 frames of silence (`gap=`, mostly while loading)
+  in 189 s. SC3's movie soundtracks are host audio mixed into the output; the game never streams PCM on core 0.
+- **IRX modules recompiled** (`PS2X_IOP_NATIVE=1`, set by the override unless already set; `=0` interprets them).
+  `scripts/iop_recomp.sh` boots with `PS2X_IOP_DUMP_MODULES` and runs PS2Recomp's `tools/iop_recomp.py` on each
+  module into `generated/iop/`: CRI_ADXI 302 functions, MCMAN 202, PADMAN 136, LIBSD 59, SIO2MAN 49, NUSOUND 28,
+  MCSERV 24, SDRDRV 13, none left to the interpreter. Regress route on par with the interpreter: 58.20 fps, 17362
+  AutoDMA transfers, 14 empty halves (interpreted: 58.13 fps, 17364, 17).
 - **VIF1 worker with the GS lag** (`setVif1Threaded(true)`, `setGsLag(true)`). VU1 took about 42% of the game
   thread in fights. VIF1 and the VU1 microcode now run on a worker that runs ahead of the EE on its own EE-cycle
   clock; the EE blocks only when it reaches a point past the busy worker's clock, and GS events raised by worker
