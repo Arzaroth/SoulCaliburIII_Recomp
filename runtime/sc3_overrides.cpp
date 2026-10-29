@@ -2,6 +2,7 @@
 #include "ps2_runtime.h"
 #include "ps2_recompiled_functions.h"
 #include "runtime/ee_scheduler.h"
+#include "sc3_native.h"
 
 #include <algorithm>
 #include <atomic>
@@ -1164,6 +1165,7 @@ namespace
             runtime.registerFunction(kInitAfsUpdate, initAfsUpdateTraced);
         if (const char *trace = std::getenv("PS2X_SC3_TRACE_TASKS"); trace && *trace)
             runtime.registerFunction(kCreateTask, createTaskTraced);
+        sc3::installNativeVu1(runtime);
     }
 }
 
