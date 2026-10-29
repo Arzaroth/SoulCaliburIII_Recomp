@@ -1153,6 +1153,22 @@ namespace
     // EE time follows real time over the whole run, not frame by frame: a frame that accounts more cycles than it took
     // (spinning on the GS) leaves a lead the next frames use up, or the IOP runs ahead and the SPU2 drops what it mixes.
     // The FramePacer's step stops at 0.1 s, but a load stalls a frame for longer: a deficit is charged up to a second.
+    void followFrameCapFile(PS2Runtime *runtime)
+    {
+        static const char *path = std::getenv("SC3_FRAME_CAP_FILE");
+        if (!path || !*path)
+            return;
+        std::ifstream file(path);
+        long cap = -1;
+        if (!(file >> cap) || cap < 0)
+            return;
+        if (runtime->framePacer().cap() != static_cast<uint32_t>(cap))
+        {
+            runtime->framePacer().setCap(static_cast<uint32_t>(cap));
+            std::cerr << "[sc3] frame cap " << cap << " (SC3_FRAME_CAP_FILE)" << std::endl;
+        }
+    }
+
     double nativeFrameEnd(PS2Runtime *runtime)
     {
         EeScheduler &scheduler = runtime->eeScheduler();
@@ -1205,6 +1221,7 @@ namespace
             EeScheduler &scheduler = runtime->eeScheduler();
             const bool wasNative = scheduler.nativeFrames();
             followMovies(runtime);
+            followFrameCapFile(runtime);
             if (scheduler.nativeFrames() && !wasNative)
             {
                 g_frameEndCycle = scheduler.currentCycle();
