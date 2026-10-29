@@ -19,6 +19,10 @@
 #   REGRESS_HANG_SECS   default 20
 #   REGRESS_FIGHT_SECS  length of the fight (default 60)
 #   REGRESS_PAUSE_SECS  presented-frame dumps (one a second) to wait in the pause menu before pause.png (default 3)
+#   REGRESS_NATIVE_VU1_AB=1
+#                     the run on VU1 with SC3_NATIVE_VU1=1 switched off (SC3_NATIVE_VU1_SWITCH); in the pause menu
+#                     pause_vu1.png a little after pause.png (pause_floor_psnr: how still the pause is), then the
+#                     sandbox switched on for pause_native.png (pause_native_psnr, against pause.png)
 #   REGRESS_PAUSE_HIDE="A:0x10 B:0x1388 ..."
 #                     in the pause menu, one still per entry with that VU1 program hidden (SC3_NATIVE_VU1_HIDE), as
 #                     pause_hide_<entry>.png, and pause_hide.txt: each one's imgdiff against pause.png
@@ -59,6 +63,12 @@ input=$out/pad_input.txt
 rm -rf "$frames" "$shots" "$out"/last_frame.* "$out"/pause*.png "$out"/pause_hide.txt "$out/summary.txt" "$out/details.txt" "$out/errors.txt" "$out/pad.txt"
 mkdir -p "$frames" "$shots"
 : > "$input"
+native_switch=
+if [ "${REGRESS_NATIVE_VU1_AB:-0}" = 1 ]; then
+    native_switch=$out/native_vu1.switch
+    echo 0 > "$native_switch"
+    export SC3_NATIVE_VU1=1 SC3_NATIVE_VU1_SWITCH="$native_switch"
+fi
 hide_file=
 if [ -n "${REGRESS_PAUSE_HIDE:-}" ]; then
     hide_file=$out/native_vu1.hide
@@ -156,6 +166,13 @@ route()
     done
     press START; await "$pause_secs" || return 1
     pause_still pause.png
+    if [ -n "$native_switch" ]; then
+        await "$pause_secs" || return 1
+        pause_still pause_vu1.png
+        echo 1 > "$native_switch"
+        await "$pause_secs" || return 1
+        pause_still pause_native.png
+    fi
     if [ -n "$hide_file" ]; then
         local entry
         for entry in $REGRESS_PAUSE_HIDE; do
@@ -222,6 +239,17 @@ underruns=$(grep -ao '^\[spu2:stats\].* underruns [0-9]*' "$log" | tail -1 | awk
 adma_underruns=$(grep -ao '^\[state\] *\[SPU2\] samples=.*underruns [0-9]*' "$log" | tail -1 | awk '{ print $NF }' || true)
 grep -a -v '^\[state\]' "$log" | grep -a -i -E "$errors" \
     | sed -E 's/0x[0-9a-fA-F]+/X/g; s/[0-9]+/N/g' | sort | uniq -c | sort -rn > "$out/errors.txt" || true
+pause_psnr()
+{
+    if [ -f "$out/pause.png" ] && [ -f "$out/$1" ]; then
+        python3 -I "$root/scripts/imgdiff.py" "$out/pause.png" "$out/$1" --diff "$out/${1%.png}_diff.png" \
+            | sed -n 's/^psnr=\([^ ]*\).*/\1/p'
+    else
+        echo NA
+    fi
+}
+pause_floor_psnr=$(pause_psnr pause_vu1.png)
+pause_native_psnr=$(pause_psnr pause_native.png)
 if [ -n "$hide_file" ]; then
     for entry in $REGRESS_PAUSE_HIDE; do
         still=pause_hide_$(echo "$entry" | tr ':*' '__').png
@@ -248,6 +276,8 @@ spu2_underruns=${underruns:-NA}
 spu2_adma_underruns=${adma_underruns:-NA}
 error_lines=$error_lines
 warning_lines=$warning_lines
+pause_floor_psnr=$pause_floor_psnr
+pause_native_psnr=$pause_native_psnr
 EOF
 cat > "$out/details.txt" <<EOF
 fight_at_s=$fight_at_s
