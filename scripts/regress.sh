@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # usage: scripts/regress.sh <build-dir> <out-dir>
 # Scripted regression route: boot with movies off, title, Mode Select, Single Player Modes, Practice into a Free
-# Training fight, a minute of attacks, then stop. Each press waits for a number of presented frames rather than a
-# fixed time, so a slow start does not throw the route off. Exits 0 once the run itself completed; the verdict is in
-# <out-dir>/summary.txt (key=value, NA when unknown). Also writes run.log, last_frame.png (last_frame.raw, 640x448
-# RGBA, without a PNG), errors.txt, details.txt and pad.txt (each press with its time and presented frame).
+# Training fight, a minute of attacks, the pause menu, then stop. Each press waits for a number of presented frames
+# rather than a fixed time, so a slow start does not throw the route off. Exits 0 once the run itself completed; the
+# verdict is in <out-dir>/summary.txt (key=value, NA when unknown). Also writes run.log, last_frame.png
+# (last_frame.raw, 640x448 RGBA, without a PNG), pause.png (the fight frozen under the pause menu, the same scene for as
+# long as it stays paused: the still to compare renderers with, scripts/imgdiff.py), errors.txt, details.txt and
+# pad.txt (each press with its time and presented frame).
 #   route_reached     1 once every press of the route and the fight's attacks were played without a hang or crash
 #   exit              ok, hang (process alive, presented frame unchanged for REGRESS_HANG_SECS), crash (process
 #                     ended early), timeout (still alive 10 s after being told to stop)
@@ -16,6 +18,7 @@
 #                     AutoDMA input halves the SPU2 found empty while the game streams (ADX), from the state dump
 #   REGRESS_HANG_SECS   default 20
 #   REGRESS_FIGHT_SECS  length of the fight (default 60)
+#   REGRESS_PAUSE_SECS  presented-frame dumps (one a second) to wait in the pause menu before pause.png (default 3)
 #   SC3_ELF             game ELF (default: game/SLUS_212.16 of this repo)
 #   PS2X_SPU2_WALLCLOCK default 1, as scripts/run.sh
 set -euo pipefail
@@ -27,6 +30,7 @@ out=$2
 elf=${SC3_ELF:-$root/game/SLUS_212.16}
 hang_secs=${REGRESS_HANG_SECS:-20}
 fight_secs=${REGRESS_FIGHT_SECS:-60}
+pause_secs=${REGRESS_PAUSE_SECS:-3}
 period=5
 
 runner=
@@ -49,7 +53,7 @@ frames=$out/frames
 shots=$out/shots
 log=$out/run.log
 input=$out/pad_input.txt
-rm -rf "$frames" "$shots" "$out"/last_frame.* "$out/summary.txt" "$out/details.txt" "$out/errors.txt" "$out/pad.txt"
+rm -rf "$frames" "$shots" "$out"/last_frame.* "$out"/pause*.png "$out/summary.txt" "$out/details.txt" "$out/errors.txt" "$out/pad.txt"
 mkdir -p "$frames" "$shots"
 : > "$input"
 : > "$log"
@@ -141,7 +145,17 @@ route()
         press RIGHT; await 1 || return 1
         t=$((t + 3))
     done
+    press START; await "$pause_secs" || return 1
+    pause_still pause.png
     route_reached=1
+}
+
+pause_still()
+{
+    local newest
+    newest=$(ls "$frames" | sort -t_ -k2 -n | tail -1)
+    [ -n "$newest" ] || return 0
+    python3 -I "$root/scripts/imgdiff.py" --png "$frames/$newest" "$out/$1" || true
 }
 
 route_reached=0
