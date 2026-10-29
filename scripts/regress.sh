@@ -20,6 +20,9 @@
 #   REGRESS_FIGHT_SECS  length of the fight (default 60)
 #   REGRESS_PAUSE_SECS  presented-frame dumps (one a second) to wait in the pause menu before pause.png (default 3)
 #   REGRESS_SHOT_SECS   seconds between the captures in shots/ (default 5)
+#   REGRESS_FIGHT_FRAME_CAP=<fps>
+#                     the frame cap from the fight's start on (SC3_FRAME_CAP_FILE; 0 = uncapped), the menus before it
+#                     at the default cap: uncapped menus run ahead of the route's presses
 #   REGRESS_KEEP_SHOTS=1
 #                     keeps shots/ (frame_<tenths of a second>.png), to compare effects between two runs
 #   REGRESS_NATIVE_VU1_AB=1
@@ -73,6 +76,12 @@ if [ "${REGRESS_NATIVE_VU1_AB:-0}" = 1 ]; then
     native_switch=$out/native_vu1.switch
     echo 0 > "$native_switch"
     export SC3_NATIVE_VU1=1 SC3_NATIVE_VU1_SWITCH="$native_switch"
+fi
+cap_file=
+if [ -n "${REGRESS_FIGHT_FRAME_CAP:-}" ]; then
+    cap_file=$out/frame_cap
+    rm -f "$cap_file"
+    export SC3_FRAME_CAP_FILE="$cap_file"
 fi
 hide_file=
 if [ -n "${REGRESS_PAUSE_HIDE:-}" ]; then
@@ -160,6 +169,7 @@ route()
     press RIGHT; await 2 || return 1
     for i in 1 2 3 4 5; do press CROSS; await 4 || return 1; done
     await 20 || return 1
+    [ -z "$cap_file" ] || echo "$REGRESS_FIGHT_FRAME_CAP" > "$cap_file"
     fight_mark=$(grep -a -c '^\[state\] gs frames=' "$log" || true)
     fight_at_s=$(( $(date +%s) - start ))
     local t=0
