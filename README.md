@@ -13,8 +13,10 @@ Not an emulator: the game's own MIPS R5900 code, rebuilt as a native program on 
 <img src="docs/screenshots/fight.jpg" width="49%"> <img src="docs/screenshots/title_screen.jpg" width="49%">
 <img src="docs/screenshots/character_select.jpg" width="49%"> <img src="docs/screenshots/versus.jpg" width="49%">
 <img src="docs/screenshots/chronicles_field.jpg" width="49%"> <img src="docs/screenshots/stage_select.jpg" width="49%">
+<img src="docs/screenshots/fight_2.jpg" width="49%"> <img src="docs/screenshots/opening_movie.jpg" width="49%">
 
-<sub>Captured from the running port (640x448 internal resolution, GPU renderer).</sub>
+<sub>Captured from the running port on the <a href="#native-branch">native branch</a>: native OpenGL GS renderer at
+twice the internal resolution (<code>PS2X_GS_SCALE=2</code>, 1280x896), scaled to 960x720.</sub>
 
 </div>
 
@@ -29,9 +31,14 @@ Not an emulator: the game's own MIPS R5900 code, rebuilt as a native program on 
 ## Status
 
 **Playable from start to finish in automated tests, now in human testing.** Fights run at 60 frames per second in
-real time on a Ryzen 7 7800X3D with the GPU renderer, with music and voices. Every mode has been played through with
-scripted input: Tales of Souls to the credits, Chronicles of the Sword battles on the field map, World Competition,
-Soul Arena, Museum, Character Creation, Shop and Options, with saves loaded back after a restart.
+real time on a Ryzen 7 7800X3D with the GPU renderer, with music and voices, and the sound no longer "fries" (IOP
+thread scheduling, IOP clock and time stretcher fixes). Every mode has been played through with scripted input: Tales
+of Souls to the credits, Chronicles of the Sword battles on the field map, World Competition, Soul Arena, Museum,
+Character Creation, Shop and Options, with saves loaded back after a restart. `main` builds on PS2Recomp's upstream
+`main` (7312280) and runs the game's own `rand`: the 15-bit stub it used to be bound to made every random pick 0.
+
+The port is moving to the native target the other PS2Recomp ports use; that work is on the `native` branch, see
+[Native branch](#native-branch).
 
 | Milestone | |
 |---|:---:|
@@ -44,10 +51,35 @@ Soul Arena, Museum, Character Creation, Shop and Options, with saves loaded back
 | Tales of Souls, World Competition, Soul Arena, Museum, Shop | ✅ |
 | Chronicles of the Sword: story, field map, battles | ✅ |
 | Memory card: save and load | ✅ |
+| Random picks (the game's own `rand`) | ✅ |
 | Long play sessions by a human | 🔧 |
-| Widescreen, higher resolution | ⏳ |
+| Native GS renderer (OpenGL), recompiled IOP modules, SPU2 on the wall clock | 🔧 `native` branch |
+| Higher internal resolution (`PS2X_GS_SCALE`) | 🔧 `native` branch |
+| Frame loop on the native FramePacer | 🔧 |
+| Widescreen | ⏳ |
 
-✅ works · 🔧 in progress · ⏳ not reached yet
+✅ works on `main` · 🔧 in progress · ⏳ not reached yet
+
+### Native branch
+
+The `native` branch moves the port to the native target the other PS2Recomp ports run on. It pins PS2Recomp's
+`sc3/native` integration branch (`native/renderer` plus the SC3 fixes below, 6c95560) and is not merged into `main`
+yet.
+
+- **Native GS renderer by default**: PS2Recomp's GS back end translates the GS stream into OpenGL draws
+  (`GSNativeBackend`), without paraLLEl-GS; `PS2X_GS_RENDERER=parallel` or `cpu` picks the others. SC3 needed four
+  fixes in it: pixels sampled at their integer coordinates as the GS does (a one-pixel seam every 64 pixels and a
+  soft picture before), HIGHLIGHT and HIGHLIGHT2 adding the vertex alpha at its own scale, blending with Ad at the
+  GS's scale, and draws testing against the Z buffer their ZBUF names (the shadow pass darkened the whole frame).
+- **Higher internal resolution**: `PS2X_GS_SCALE=2` draws at 1280x896. The screenshots above come from it.
+- **IOP modules recompiled**: `scripts/iop_recomp.sh` turns the eight IRX modules into native code (813 functions,
+  none left to the interpreter); `PS2X_IOP_NATIVE=0` interprets them again.
+- **SPU2 on the wall clock** by default (`PS2X_SPU2_WALLCLOCK=1` in the scripts), with an AutoDMA fix so the ADX
+  stream gets each half's interrupt in time. A movie sound regression it brings is being fixed.
+- **Speed**: the regression route runs at 58.2 fps at the native scale and 58.1 fps at `PS2X_GS_SCALE=2`, against
+  60.1 fps on `main` with paraLLEl-GS; the frame loop on PS2Recomp's FramePacer is in progress.
+
+[RECOMP_NOTES.md](RECOMP_NOTES.md) on the `native` branch has the details and the measurements.
 
 [RECOMP_NOTES.md](RECOMP_NOTES.md) records how the port was brought up, every fix and how it was found.
 

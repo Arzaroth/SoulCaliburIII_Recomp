@@ -20,6 +20,9 @@ matched from its embedded database), then grew by hand:
     boot.
 - **Stubs.** libcdvd, libdma, libgraph, libpad and libmpeg entry points are bound to the runtime's handlers by
   name (`stubs`), so CD reads, DMA and pad I/O go through the HLE layer.
+- **The game's own `rand` (0x42D508) is recompiled, not stubbed.** The runtime's `rand` stub returned
+  `std::rand() & 0x7FFF`, while the game's newlib code scales its results by RAND_MAX 0x7FFFFFFF, so every random
+  pick came out 0. The recompiled `rand` follows the game's own `srand`.
 - **`[mmio]` and `[jump_tables]`** are the analyzer's, kept as generated.
 
 The recompiler emits one C++ file per function (about 12,900 with the entry stubs) and `register_functions.cpp`,
@@ -229,7 +232,15 @@ Open:
   movies on).
 - The root cause of the ordering-table double link behind the old menu-transition freeze was never found: it no
   longer reproduces since catch-up is off and the GS/CD timing fixes, but other timings may bring it back.
-- Not reached yet: widescreen and higher internal resolution.
+- Not reached yet on `main`: widescreen and higher internal resolution.
+
+On the `native` branch (not merged), the port runs on the native target the other ports use, through PS2Recomp's
+`sc3/native` integration branch (6c95560): the native GS renderer (`GSNativeBackend`, OpenGL) by default with the SC3
+fixes for pixel centres and the 64-pixel seams, HIGHLIGHT alpha, Ad blending and the Z buffer a draw's ZBUF names
+(shadows); the SPU2 on the wall clock; the eight IRX modules recompiled (813 functions, `scripts/iop_recomp.sh`). The
+regression route runs at 58.2 fps (60.1 on `main` with paraLLEl-GS), and at 58.1 fps with `PS2X_GS_SCALE=2`
+(1280x896). Still open there: a movie sound regression with the SPU2 on the wall clock, and the frame loop on
+PS2Recomp's FramePacer. That branch's RECOMP_NOTES.md has the measurements.
 
 ## Debugging recipes
 
