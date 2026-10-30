@@ -194,6 +194,8 @@ screen space), the pause still on the sandbox matches VU1: 34.6 dB against a flo
 the fighters drawn. Weapon trails, hit sparks and guard flashes show in captures every second over the fight.
 `SC3_NATIVE_VU1_GSWRITES=0` draws through the native renderer's own pass instead (20 dB, after the
 `sc3/native-gif-blend` fixes: Ad blends, A == B opaque, As stored, TFX / TCC, REGION_REPEAT / REGION_CLAMP windows).
+Since the programs draw directly (below), packets and their register replay are only used with
+`SC3_NATIVE_VU1_DIRECT=0` or on the sandbox.
 
 The adapter runs on the VIF1 worker (`Config::onVif1Thread`, PS2Recomp `sc3/native-vu1-worker`;
 `SC3_NATIVE_VU1_THREAD=0` keeps it on the game thread): VIF1 hands it the stream up to each MSCAL as it gets there, so
@@ -381,6 +383,74 @@ program in C++ (VU1 and VU0) against every program on the sandbox and VU0 on its
 
 On `sc3/native-vu1` e33f7853 (the host-clock IOP and native/renderer 71524c5 merged): 60.00 and 60.02 capped,
 60.98 and 60.88 uncapped.
+
+#### Direct draws (`runtime/sc3_draw_sink.cpp`)
+
+The C++ programs above still wrote the GIF packet the microcode would XGKICK; `GifToNative` parsed it into batches and
+the GS front end replayed its register writes (`gsWrites`) before the GL back end drew them. They now draw straight
+from what they compute (`SC3_NATIVE_VU1_DIRECT`, on by default with the C++ ports; `=0` the packets, `=check` both,
+compared; `@file` read at each frame end).
+
+What the packets carried (every MSCAL of the regress route, `SC3_NATIVE_VU1_RECORD`):
+
+| | Where it comes from | What it holds |
+| --- | --- | --- |
+| Vertex tag | VIF data at TOP + 0, copied by the program to the packet base (TOP + 0xef for A, TOP + 0xee for B) | NLOOP vertices, EOP, PACKED, NREG 3 (ST, RGBAQ, XYZF2), PRE with PRIM: 0x5c (Gouraud, textured, blended strip), 0x7c (fogged), 0x4c (untextured), 0x5d / 0x7d (fans), context 1 always |
+| Vertices | computed | per vertex S/T/Q, RGBA and X/Y/Z with F and ADC in the position's w (an ISW), three quadwords apart |
+| A+D block | VIF data at TOP + 0x19f (the setup header's word at TOP + 0x1ad + 17 .y gives its offset), kicked from VU memory as is by the setups (A:0x10, A:0x1c80, B:0x10, B:0x1990 and the routines they jump to) before their vertices | TEX1_1 (0x61: bilinear), TEX0_1 (T8 textures, CT32 CLUTs, CLD 1), CLAMP_1, ALPHA_1 (0xa opaque, 0x44 blend, 0x48 additive, 0x58 additive by destination alpha, 0x89 multiply, 0x42 subtract), TEST_1 (0x50000 Z GEQUAL, 0x5002d alpha > 2, 0x53001 alpha NEVER with RGB_ONLY); MIPTBP1_1 for mipmapped stage parts (A:0x10>0x2b0); untextured setups only ALPHA_1 and TEST_1 |
+
+Routines called on their own (A:0xd8, B:0x15e8, ...) kick only vertices: they draw with what the last A+D block set.
+The A+D blocks are the game's material data as it keeps it: one 0x80-byte block per material in the stage and
+character data loaded into RDRAM (0x01841500 onwards in the route's fight, the same addresses every frame, referenced
+by the VIF chain), with ALPHA and TEST words from tables in the ELF's data (A+D quadwords at 0x4740b0 onwards) that its
+EE code picks from (it also builds TEST words itself, `lui 5 / ori 0x2d` at 0x1106f8, 0x170554, ...). There is no
+higher-level EE material structure they are made from at draw time, so the sink decodes those GS register words
+natively (`ps2x::gs::decodeTex0`, no GS front end): the one fallback the native path takes.
+
+How it draws:
+
+- `PS2Recomp/tools/vu1_lift.py` (its sink form, `"sink"` in `recomp/vu1_lift_spec.json`) runs a VI address analysis
+  over every timed path (each VI as TOP or a constant plus c + stride * k): the XGKICK at a constant address is the
+  packet's base, stores from there to TOP + 0x19f are its quadwords, each a fixed field of a vertex (stride 3) or the
+  tag. Programs A and B get a second form, `programA<kSticky, true>`, in which those stores go to
+  `DrawSink::put<field, dest>` instead of VU memory and each XGKICK to `DrawSink::kick` (its PATH1 time from the tag);
+  the B:0x1388 hand port does the same (`drawSkinnedBody`). Registers, flags, cycles and the rest of VU memory are the
+  same as with packets.
+- The sink keeps the vertices by field, the PRIM from the vertex tag and the drawing registers from the A+D blocks
+  (both contexts, kept from one MSCAL to the next as the GS keeps them); a kick of the program's packet turns strips
+  and fans into triangles (ADC vertices draw nothing) with the GS's own numbers (X / 16, Y / 16, 24-bit Z, Q = 1 when
+  0) and hands them to `Renderer::drawGs`; a kick of VIF data is an A+D block to decode.
+- `Renderer::drawGs` (PS2Recomp `sc3/native-direct-draws`) queues them for the program's group; at the group's GS
+  marker the GL back end draws them (`GSRasterBackend::SubmitNative`) into the render target there, with the
+  material's TEX0 (its CLUT loaded once, at the first draw after the game set it), TEX1, CLAMP, ALPHA, TEST and MIPTBP
+  and the target's FRAME, ZBUF, XYOFFSET, SCISSOR, TEXA, FOGCOL and dithering. No GIF packet, `GifToNative` or
+  `GS::writeRegisterUnlocked` in between; the CPU GS renderer draws them the same way.
+- Programs without a C++ port would stay on VU1 (none over the modes checked); `gsWrites` and the native DIRECTs are
+  off unless the packets are asked for.
+
+Checked:
+
+- `SC3_NATIVE_VU1_DIRECT=check` over the regress route: 5,620,182 MSCALs run both ways, the direct draws (material and
+  every vertex, bit for bit) against the packets read back, registers, flags, cycles and VU memory outside the packet:
+  no difference; no packet other than the vertex and A+D ones, no register the sink does not know, no other
+  primitive.
+- Pause still of the same frozen fight, against VU1 (`REGRESS_NATIVE_VU1_AB=1 REGRESS_NATIVE_VU1_DIRECT_AB=1`):
+  on the native GL GS renderer, direct draws 33.24 dB, packets 33.23, two VU1 stills 34.94; direct against packets
+  85.8 dB (one level off at most); the only difference with VU1 is the blinking pause menu. On the CPU GS reference
+  (`PS2X_GS_RENDERER=cpu`, VU1 there too): direct draws 33.75 dB against VU1, 39.2 dB over the 3D below the menu.
+- VU1 and direct draws flipped every 3 s (`SC3_NATIVE_VU1_SWITCH`), a frame captured a second, PSNR of consecutive
+  captures across a flip against those without one (median): title 12.4 / 13.4, menus 21.8 / 23.1, character select
+  20.4 / 20.6, fight 11.8 / 11.6, Chronicles of the Sword field map 26.1 / 26.3: no difference beyond the scenes'
+  own motion.
+
+Speed, regress route, Free Training, two runs a side, clean builds (main f1fdb63 against this branch; the same binary
+with `SC3_NATIVE_VU1_DIRECT=0` for the packets):
+
+| | Capped | Uncapped fight |
+| --- | --- | --- |
+| main (packets, GS register replay) | 60.03, 59.97 | 60.93, 60.67 |
+| this branch, packets | 60.03, 60.03 | 60.72, 60.45 |
+| this branch, direct draws | 60.05, 60.00 | 62.62, 62.42 |
 
 #### VU0 microprograms in C++ (`runtime/sc3_vu0.cpp`)
 
