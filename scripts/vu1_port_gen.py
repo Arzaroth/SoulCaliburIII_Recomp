@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""SC3's VU1 program A as C++, from the microcode ps2_vu_aot compiled (generated/vu1): each instruction as the
+"""SC3's VU1 programs A and B as C++, from the microcode ps2_vu_aot compiled (generated/vu1): each instruction as the
 operation it does on registers held in locals, with what VU1Interpreter's pipeline makes timing-dependent (stalls and
 cycles, when Q, MAC and clip results become visible, the VI a branch reads, XGKICK waits) worked out here for every
 path from each start pc, so the C++ runs no pipeline. scripts/recomp.sh runs it.
 
-  scripts/vu1_port_gen.py <ps2_vu_aot output dir> <out dir>     writes sc3_vu1_a.cpp
-  scripts/vu1_port_gen.py --code <image.bin> A <out.cpp>   from a code image instead
+  scripts/vu1_port_gen.py <ps2_vu_aot output dir> <out dir>     writes sc3_vu1_a.cpp and sc3_vu1_b.cpp
+  scripts/vu1_port_gen.py --code <image.bin> <A|B> <out.cpp>   from a code image instead
 """
 import argparse
 import glob
@@ -968,6 +968,11 @@ PROGRAMS = {
                        0x1c80, 0x1d28, 0x1f00, 0x2098, 0x2140, 0x2330],
               targets=[0xd8, 0x2b0, 0x450, 0x768, 0xa48, 0xc18, 0xda8, 0xf68, 0x1268, 0x1558, 0x1730, 0x18c0, 0x1ab8, 0x1d28,
                        0x1f00, 0x2140, 0x2330]),
+    'B': dict(hash=0xd2fbf7af837a8df4, pairs=1352, function='programB', file='sc3_vu1_b.cpp',
+              entries=[0x10, 0xd8, 0x350, 0x5b0, 0x910, 0xb78, 0xdd0, 0x10f0, 0x1388, 0x15e8, 0x1990, 0x1a40, 0x1ca8, 0x1ef0,
+                       0x21e0, 0x2290, 0x24f8, 0x2740],
+              targets=[0xd8, 0x350, 0x5b0, 0x910, 0xb78, 0xdd0, 0x10f0, 0x1388, 0x15e8, 0x1a40, 0x1ca8, 0x1ef0, 0x2290, 0x24f8,
+                       0x2740]),
 }
 
 
