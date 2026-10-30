@@ -160,7 +160,8 @@ XGKICK packets through `GifToNative` into the GS targets, at the program's point
 
   Hiding a program also skips what it leaves in VU memory for the next ones, so a hidden setup program takes later
   ones with it.
-- `SC3_NATIVE_VU1=1` (the default): every program runs on the sandbox, wherever VU1 would run it (menus, character select, attract
+- `SC3_NATIVE_VU1=1` (the default): every program runs off VU1 (in C++ since the ports below; on the sandbox with
+  `SC3_NATIVE_VU1_PORT=0`), wherever VU1 would run it (menus, character select, attract
   fights, Character Creation, fights), the draw-only DIRECTHL packets too (none qualify: every DIRECTHL of a fight
   carries register setup). `SC3_NATIVE_VU1_SWITCH=<file>`
   (1 sandbox, 0 VU1, read at each frame end) and `REGRESS_NATIVE_VU1_AB=1` compare the two on the frozen pause:
@@ -279,6 +280,70 @@ thread, and its packets go to the GS thread. On the sandbox the VIF1 thread also
 (`GifToNative`, about 730 samples) and keeps the texture cache (`TextureCache::uploadLocked` and `WriteCT32`, about
 1050). The next step for B:0x1388 is batches straight from the port, without building and reading back its GIF
 packet.
+
+#### Programs A and B in C++ (`scripts/vu1_port_gen.py`, `generated/vu1port/`)
+
+Every MSCAL of A and B runs as C++ by default: A's 20 start pcs (the setups at 0x10, 0x1c80 and 0x2098, which load
+the constants and JR to a routine whose address the stream left in VU memory, and the 17 routines) and B's 18 (setups
+at 0x10, 0x1990, 0x21e0 and 15 routines). B:0x1388 called directly keeps its hand-written port above while the
+status holds sticky Z and S. `SC3_NATIVE_VU1_LOG` names entries with their JR target (`A:0x10>0x2b0`) and prints a
+line of MSCALs left on the sandbox whenever there are any: over everything checked below, none.
+
+`scripts/vu1_port_gen.py` writes the C++ from the microcode `ps2_vu_aot` compiled; `scripts/recomp.sh` runs it, so,
+like `generated/`, nothing derived from the game is in the repository.
+
+- Each instruction becomes the operation it does on the VU registers, held in locals, with the interpreter's float
+  rules (operands normalized, the PS2 addition, round toward zero, MAX/MINI on raw bits, FTOI, CLIP). A result or an
+  FMAC product outside the normal range goes through the interpreter's own classification (`Vu1Lifted::fmacFlags`,
+  PS2Recomp `sc3/native-vu1-all`).
+- What VU1Interpreter's pipeline makes depend on timing is worked out by the generator, for every path from every
+  start pc, with the pipeline state as part of where a path is: each pair's stall (VF/VI/ACC latencies, the DIV
+  unit), when a DIV's Q becomes visible to MULq, which CLIP an FCAND sees and which FMAC an FMAND sees, the old VI a
+  branch reads right after an IALU write, the cycles. A loop's first iteration and its steady state become separate
+  code where their timing differs: 1675 timed pairs for A's 1177, 1861 for B's 1352.
+- XGKICK: a PATH1 transfer of two cycles a qword; the next XGKICK and the program's end wait for it (the only timing
+  the data decides). A store while a transfer may still read VU memory (A at 0x1c60 writes the next packet's tag)
+  lets it catch up first, as the interpreter does.
+- MAC flags are computed only where an FMAND or the end state reads them, sticky Z and S only while the status does
+  not hold them yet; U and O only arise on the exact path.
+
+Checked bit for bit (packets, VU memory, registers, Q and I, clip, MAC, status, pc, cycles):
+
+- 15,059 runs recorded from the sandbox over the regress route (`SC3_NATIVE_VU1_RECORD`, replayed by `sc3_tests`
+  with `SC3_VU1_TRACE`): no difference.
+- `SC3_NATIVE_VU1_PORT=check`, the port and the sandbox on every MSCAL, compared, with no MSCAL left on the sandbox:
+  the regress route (5.35 M MSCALs), the attract demo idling on the title (5.80 M), Tales of Souls through three
+  episodes (5.95 M), Chronicles of the Sword (6.85 M), VS Modes (4.42 M), the Shop (4.50 M) and Options (0.56 M):
+  33.4 M MSCALs, no difference. Entries seen: every start pc of A but 0xda8, 0xf68, 0x2098/0x2140 and 0x2330, of B
+  but 0xd8, 0xb78, 0xdd0, 0x10f0, 0x21e0/0x2290, 0x24f8 and 0x2740 (ported all the same, never run in these modes).
+
+Cost, replaying the route's runs on stallman: 2.5-8 us a run for A's entries against the sandbox's 5.3-13.5, 7-16 us
+for B's against 13-30. Regress, Free Training, two runs a side, on the same runtime (PS2Recomp 4ebc8e3a), every
+program in C++ (VU1 and VU0) against every program on the sandbox and VU0 on its interpreter
+(`SC3_NATIVE_VU1_PORT=0 SC3_NATIVE_VU0=0`):
+
+| | Capped | Uncapped fight |
+| --- | --- | --- |
+| sandbox and VU0 interpreter | 59.02, 59.78 | 55.72, 55.87 |
+| C++ | 60.00, 60.02 | 61.43, 62.57 |
+
+On `sc3/native-vu1` e33f7853 (the host-clock IOP and native/renderer 71524c5 merged): 60.00 and 60.02 capped,
+60.98 and 60.88 uncapped.
+
+#### VU0 microprograms in C++ (`runtime/sc3_vu0.cpp`)
+
+VU0 runs SC3's math library as microcode (`VCALLMS` from about 15 EE functions): one program, the 172 pairs
+`ps2_vu_aot` found at ELF offset 0x367a90 (VU0 code memory hash 5e40f831...), called from 0x0, 0x38, 0x60, 0xf0,
+0x360, 0x3c8 and 0x3e8, about 370,000 times a second in a fight. `PS2Runtime::setVu0MicroHook` (PS2Recomp
+`sc3/native-vu1-all`) hands each call to `runtime/sc3_vu0.cpp`, which runs the program as C++ written by
+`vu1_port_gen.py` the same way as VU1's (VU0's 4 KB memories and branch range, plus ITOF, MR32, SQRT, RSQRT, WAITQ,
+FCGET), from the state VU0 starts at (reset, the registers and flags copied from the EE context).
+`SC3_NATIVE_VU0=0` gives every call back to the interpreter, `=check` runs both and compares; `SC3_NATIVE_VU0_LOG`
+and `SC3_NATIVE_VU0_RECORD` log and record as for VU1.
+
+Checked: the route's 7,732 recorded runs replayed by `sc3_tests` (`SC3_VU0_TRACE`), 0.15-0.36 us a run, and
+`SC3_NATIVE_VU0=check` over the same seven runs as VU1 above: 197.4 M calls, no difference, none left to the
+interpreter. 0x18 and 0x438 never ran.
 
 ### Test harness and tracers
 
