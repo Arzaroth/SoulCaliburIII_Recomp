@@ -1,9 +1,12 @@
 #include "sc3_native.h"
+#include "sc3_vu1_port.h"
 
 #include "ps2_runtime.h"
 #include "runtime/native/native_vif1.h"
+#include "runtime/native/native_vu1_sandbox.h"
 #include "runtime/native/native_vu1_stream.h"
 #include "runtime/ps2_vu1.h"
+#include "runtime/ps2_vu1_lifted.h"
 
 #include <algorithm>
 #include <chrono>
@@ -39,11 +42,20 @@ namespace sc3
             {"A", 1177u, 0x95e81f9a833c1b45ull},
             {"B", 1352u, 0xd2fbf7af837a8df4ull},
         };
+        constexpr uint32_t kProgramB = 1u;
+        constexpr uint32_t kVuMemory = 16u * 1024u;
 
         enum class Mode
         {
             Observe,
             Sandbox,
+        };
+
+        enum class Port
+        {
+            Off,
+            On,
+            Check,
         };
 
         struct ProgramSet
@@ -61,7 +73,7 @@ namespace sc3
         struct Stats
         {
             std::unordered_map<uint64_t, uint64_t> calls;
-            uint64_t frames = 0, mscals = 0, codeChanges = 0, sandboxed = 0, hidden = 0;
+            uint64_t frames = 0, mscals = 0, codeChanges = 0, sandboxed = 0, hidden = 0, ported = 0, checked = 0, mismatches = 0;
             uint64_t frameMin = ~0ull, frameMax = 0, frameCalls = 0;
         };
 
@@ -80,6 +92,9 @@ namespace sc3
             std::string hidePath, hideSpec;
             bool log = false;
             bool onVif1Thread = false;
+            Port port = Port::Off;
+            std::string portPath;
+            bool portNext = false;
             Stats stats;
             std::chrono::steady_clock::time_point since = std::chrono::steady_clock::now();
         };
@@ -128,6 +143,7 @@ namespace sc3
             ++s.stats.frameCalls;
             if (s.log)
                 ++s.stats.calls[key(program, pc)];
+            s.portNext = false;
             if (!s.hidden.empty() && s.hidden.contains(s.names[program], pc))
             {
                 ++s.stats.hidden;
@@ -135,10 +151,157 @@ namespace sc3
             }
             if (s.sandbox && (s.only.empty() || s.only.contains(s.names[program], pc)))
             {
+                if (s.port != Port::Off && program == kProgramB && pc == kSkinnedBodyPc &&
+                    skinnedBodyReady(adapter.sandbox().vu().state()))
+                {
+                    ++s.stats.ported;
+                    s.portNext = true;
+                    return Vu1StreamAdapter::Choice::Port;
+                }
                 ++s.stats.sandboxed;
                 return Vu1StreamAdapter::Choice::Sandbox;
             }
             return Vu1StreamAdapter::Choice::Vu1;
+        }
+
+        void kickToGif(void *user, const uint8_t *packet, uint32_t bytes)
+        {
+            static_cast<ps2x::native::GifToNative *>(user)->packet(packet, bytes);
+        }
+
+        void kickToList(void *user, const uint8_t *packet, uint32_t bytes)
+        {
+            static_cast<std::vector<std::vector<uint8_t>> *>(user)->emplace_back(packet, packet + bytes);
+        }
+
+        uint64_t runPort(Vu1StreamAdapter &adapter, Vu1Kick kick, void *user)
+        {
+            VU1Interpreter &vu = adapter.sandbox().vu();
+            Vu1Lifted::landQueued(vu);
+            VU1State &state = vu.state();
+            const uint64_t cycles = runSkinnedBody(state, adapter.dataMemory(), adapter.top(), adapter.itop(), kick, user);
+            Vu1Lifted::setClip(vu, state.clip);
+            Vu1Lifted::advanceTo(vu, Vu1Lifted::cycle(vu) + cycles);
+            state.cycles = Vu1Lifted::cycle(vu);
+            return cycles;
+        }
+
+        std::string stateDifference(const VU1State &port, const VU1State &vu1)
+        {
+            std::string out;
+            char item[96];
+            for (int r = 0; r < 32; ++r)
+                if (std::memcmp(port.vf[r], vu1.vf[r], sizeof(port.vf[r])) != 0)
+                {
+                    std::snprintf(item, sizeof(item), " vf%d", r);
+                    out += item;
+                }
+            for (int r = 0; r < 16; ++r)
+                if (port.vi[r] != vu1.vi[r])
+                {
+                    std::snprintf(item, sizeof(item), " vi%d %#x/%#x", r, port.vi[r], vu1.vi[r]);
+                    out += item;
+                }
+            if (std::memcmp(port.acc, vu1.acc, sizeof(port.acc)) != 0)
+                out += " acc";
+            const auto bitsOf = [](float value) { uint32_t b; std::memcpy(&b, &value, 4); return b; };
+            if (bitsOf(port.q) != bitsOf(vu1.q) || bitsOf(port.i) != bitsOf(vu1.i) || bitsOf(port.p) != bitsOf(vu1.p))
+                out += " q/i/p";
+            if (port.clip != vu1.clip || port.mac != vu1.mac || port.status != vu1.status)
+            {
+                std::snprintf(item, sizeof(item), " clip %#x/%#x mac %#x/%#x status %#x/%#x", port.clip, vu1.clip, port.mac, vu1.mac,
+                              port.status, vu1.status);
+                out += item;
+            }
+            if (port.pc != vu1.pc)
+                out += " pc";
+            return out;
+        }
+
+        void checkPort(Vu1StreamAdapter &adapter, uint32_t pc)
+        {
+            State &s = g_state;
+            ps2x::native::Vu1Sandbox &sandbox = adapter.sandbox();
+            VU1Interpreter &vu = sandbox.vu();
+            uint8_t *data = adapter.dataMemory();
+            static std::vector<uint8_t> s_before(kVuMemory), s_portData(kVuMemory);
+            static std::vector<std::vector<uint8_t>> s_portPackets, s_packets;
+            s_portPackets.clear();
+            s_packets.clear();
+            std::memcpy(s_before.data(), data, kVuMemory);
+            Vu1Lifted::landQueued(vu);
+            const VU1State before = vu.state();
+            const uint64_t portCycles = runPort(adapter, kickToList, &s_portPackets);
+            const VU1State portState = vu.state();
+            std::memcpy(s_portData.data(), data, kVuMemory);
+            std::memcpy(data, s_before.data(), kVuMemory);
+            const uint64_t clock = vu.state().cycles;
+            vu.state() = before;
+            vu.state().cycles = clock;
+            Vu1Lifted::setClip(vu, before.clip);
+            vu.setPacketObserver([&sandbox](const uint8_t *packet, uint32_t bytes)
+                                 {
+                                     s_packets.emplace_back(packet, packet + bytes);
+                                     sandbox.gif().packet(packet, bytes);
+                                 });
+            const uint64_t cyclesBefore = sandbox.cycles();
+            sandbox.call(const_cast<uint8_t *>(adapter.code()), kVuMemory, data, kVuMemory, pc, adapter.top(), adapter.itop());
+            vu.setPacketObserver([&sandbox](const uint8_t *packet, uint32_t bytes) { sandbox.gif().packet(packet, bytes); });
+            const uint64_t cycles = sandbox.cycles() - cyclesBefore;
+            adapter.addPortCycles(cycles);
+            ++s.stats.checked;
+            std::string difference = stateDifference(portState, vu.state());
+            if (s_portPackets != s_packets)
+                difference += " packets";
+            if (std::memcmp(s_portData.data(), data, kVuMemory) != 0)
+                difference += " memory";
+            if (portCycles != cycles)
+                difference += " cycles " + std::to_string(portCycles) + "/" + std::to_string(cycles);
+            if (difference.empty())
+                return;
+            ++s.stats.mismatches;
+            static int s_logged = 0;
+            if (s_logged++ < 20)
+                std::fprintf(stderr, "[sc3:vu1] port B:%#x differs from the sandbox at TOP %#x:%s\n", pc, adapter.top(), difference.c_str());
+        }
+
+        void drawPort(Vu1StreamAdapter &adapter, uint32_t pc, bool)
+        {
+            State &s = g_state;
+            if (!s.portNext)
+                return;
+            ps2x::native::GifToNative &gif = adapter.sandbox().gif();
+            gif.setSource(pc);
+            if (s.port == Port::Check)
+            {
+                checkPort(adapter, pc);
+                return;
+            }
+            adapter.addPortCycles(runPort(adapter, kickToGif, &gif));
+            gif.flush();
+        }
+
+        Port parsePort(const std::string &value)
+        {
+            if (value == "check")
+                return Port::Check;
+            return !value.empty() && value != "0" ? Port::On : Port::Off;
+        }
+
+        void followPortFile()
+        {
+            State &s = g_state;
+            if (s.portPath.empty())
+                return;
+            std::ifstream file(s.portPath);
+            std::string value;
+            if (!std::getline(file, value))
+                return;
+            const Port port = parsePort(value);
+            if (port != s.port)
+                std::cerr << "[sc3] native VU1: B:0x1388 " << (port == Port::Off ? "on the sandbox" : port == Port::On ? "ported" : "checked")
+                          << " from the next frame" << std::endl;
+            s.port = port;
         }
 
         void report()
@@ -167,12 +330,13 @@ namespace sc3
                 }
                 std::fprintf(stderr,
                              "[sc3:vu1] %.1f s: %llu frames, mscal=%llu (per frame %.1f, %llu-%llu), code changes %llu, sandbox %llu, "
-                             "hidden %llu;%s\n",
+                             "hidden %llu, port %llu (checked %llu, mismatches %llu);%s\n",
                              seconds, static_cast<unsigned long long>(st.frames), static_cast<unsigned long long>(st.mscals),
                              st.frames ? static_cast<double>(st.mscals) / static_cast<double>(st.frames) : 0.0,
                              static_cast<unsigned long long>(st.frameMin), static_cast<unsigned long long>(st.frameMax),
                              static_cast<unsigned long long>(st.codeChanges), static_cast<unsigned long long>(st.sandboxed),
-                             static_cast<unsigned long long>(st.hidden), line.c_str());
+                             static_cast<unsigned long long>(st.hidden), static_cast<unsigned long long>(st.ported),
+                             static_cast<unsigned long long>(st.checked), static_cast<unsigned long long>(st.mismatches), line.c_str());
             }
             st = Stats{};
             s.since = now;
@@ -240,6 +404,7 @@ namespace sc3
                 {
                     followSwitch();
                     followHideFile();
+                    followPortFile();
                     report();
                     Vu1StreamAdapter::instance().frameEnd();
                 };
@@ -303,7 +468,14 @@ namespace sc3
         Vu1StreamAdapter::Config config;
         config.screen = screen();
         config.choose = choose;
-        config.draw = [](Vu1StreamAdapter &, uint32_t, bool) {};
+        config.draw = drawPort;
+        if (const char *port = std::getenv("SC3_NATIVE_VU1_PORT"); port && *port == '@')
+        {
+            s.portPath = port + 1;
+            followPortFile();
+        }
+        else if (port)
+            s.port = parsePort(port);
         config.directs = s.mode == Mode::Sandbox;
         const char *gsWrites = std::getenv("SC3_NATIVE_VU1_GSWRITES");
         config.gsWrites = nativeGs && !(gsWrites && *gsWrites == '0');
@@ -317,6 +489,7 @@ namespace sc3
                   << (s.mode == Mode::Sandbox ? "every program on the sandbox" : "observed, every program on VU1")
                   << (s.hidden.empty() && s.hidePath.empty() ? "" : ", some hidden")
                   << (s.only.empty() ? "" : ", only some on the sandbox")
+                  << (s.port == Port::On ? ", B:0x1388 ported" : s.port == Port::Check ? ", B:0x1388 checked against the port" : "")
                   << (config.gsWrites ? ", drawn by the GS back end" : ", drawn by the native renderer")
                   << (s.onVif1Thread ? ", on the VIF1 thread" : ", on the game thread") << std::endl;
     }
