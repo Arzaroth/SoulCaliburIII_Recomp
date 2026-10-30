@@ -81,4 +81,8 @@ namespace sc3
         state.itop = itop;
         return cycles;
     }
+
+    bool vu0Ported(uint64_t, uint32_t) { return false; }
+
+    uint64_t runVu0Program(uint64_t, uint32_t, VU1State &, uint8_t *) { return 0u; }
 }

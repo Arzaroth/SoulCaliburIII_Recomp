@@ -1360,6 +1360,7 @@ namespace
         if (const char *trace = std::getenv("PS2X_SC3_TRACE_TASKS"); trace && *trace)
             runtime.registerFunction(kCreateTask, createTaskTraced);
         sc3::installNativeVu1(runtime, nativeGs);
+        sc3::installNativeVu0(runtime);
     }
 }
 
