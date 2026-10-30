@@ -83,7 +83,11 @@ branch: `native/renderer` plus the SC3 fixes below, on their way into `native/re
   GS back end as native draws at their place in the GS stream; the emulated VU1 no longer draws anything
   (`SC3_NATIVE_VU1=0` gives it back). Every mode checked against VU1 looks the same: menus, title, attract fights,
   fights, Tales of Souls, Chronicles of the Sword (field map, battles, results), Character Creation and the movies.
-  Capped play holds 59.4-59.5 fps on the regression route; uncapped fights run about 55 fps against VU1's 62.
+  The hottest program, the fighters' skinned bodies (program B at 0x1388, about 313 runs a fight frame), runs as C++
+  instead (`runtime/sc3_vu1_port.cpp`), bit for bit what the sandbox leaves: packets, VU memory, registers, flags
+  and cycles (`SC3_NATIVE_VU1_PORT=0` puts it back on the sandbox, `=check` runs both and compares).
+  Capped play holds 59.0-59.3 fps on the regression route; uncapped fights run about 56 fps (1.8 more than with
+  every program on the sandbox) against VU1's 59-62.
 - **Speed**: the regression route runs at 59.6 fps (58.2 on the vblank grid), with 5 frames over 25 ms instead of
   about 590; uncapped (`PS2X_FRAME_CAP=0`) it reaches 90 GS frames per second, 112 game frames per second.
 
@@ -192,6 +196,7 @@ player 2:
 | `PS2X_GS_SCALE=<n>` | Internal resolution multiplier of the native GS back end |
 | `PS2X_IOP_NATIVE=0` | Interpret the IRX modules instead of running their recompiled code |
 | `SC3_NATIVE_VU1=0` | Run the VU1 microprograms on the emulated VU1 instead of the native sandbox |
+| `SC3_NATIVE_VU1_PORT=0\|check` | Run the fighters' skinned bodies (B:0x1388) on the sandbox instead of in C++, or both, compared |
 | `PS2X_VIF1_THREAD=0` | Run VIF1 and the VU1 microcode on the game thread (default: their own thread, about a third faster in fights) |
 | `PS2X_EE_CATCHUP=0\|field\|1` | Wall-clock catch-up: SC3 defaults to off, so emulated time never runs faster than real time |
 | `PS2X_SC3_NO_MOVIES=1` | Skip the one-shot movies (for tests) |

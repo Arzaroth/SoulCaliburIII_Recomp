@@ -224,6 +224,62 @@ Full regress, Free Training, 60 s fights, three runs a side (fight frames over 2
 
 With the title fix and the sandbox as the default: 59.42 capped, 54.9 uncapped (VU1: 59.45, 61.8).
 
+#### B:0x1388 in C++ (`runtime/sc3_vu1_port.cpp`)
+
+The fighters' skinned bodies, about 313 runs a fight frame of 3-58 vertices (1.9 bones each on average), go
+through `Choice::Port` (`SC3_NATIVE_VU1_PORT`, on by default; `=0` the sandbox, `=check` both, compared). What the
+program does, from its microcode (`vu_disasm.py` on the code image) and the AOT blocks:
+
+- TOP holds the GIF tag (NLOOP | EOP, PRE with PRIM 0x5c: a textured, Gouraud, alpha-blended strip; NREG 3: ST,
+  RGBAQ, XYZF2), then per vertex 1-5 influences of two qwords (position times weight, w the weight; normal times
+  weight, w the bone's palette address, bit 15 on the last), the ST qword (w: the vertex's flags, bit 15 ADC) and
+  the colour as floats.
+- Skinning, in place from TOP + 1: position = sum of bone (four columns, the palette at VU 0) times (x, y, z, w),
+  then through vf28-vf31 to GS screen space times w; normal = sum of the bones' 3x3 times n. Four qwords out per
+  vertex: ST and flags, colour, normal, position.
+- Lighting and projection, one vertex behind its loads (software pipelined; the first iteration's output lands at
+  TOP + 0xec and the tag overwrites it): Q = 1 / w, STQ = (ST times vf15, 1) times Q, XYZ = FTOI4 of the position
+  times Q; light = vf20 + vf21-23 times max(vf25-27 . n, 0); RGBA = FTOI0 of min(colour times light + vf10 times
+  128, vf17.x), vf10 a clamped (vf16 + n'.w) term through vf24; F = 0xff (vi3 = 0xff0). ADC when the vertex's flag
+  says so or the guard-band test ((vf18 + xyz / w) times vf19 against +-1, CLIP) fails for any of the last three
+  vertices (FCAND 0x3ffff).
+- The packet goes at TOP + 0xee, XGKICKed; a packet another program left at TOP + vi6 is kicked first (never in the
+  fights recorded).
+
+The C++ keeps the interpreter's float semantics (operands normalized, the VU's operand alignment in additions,
+round toward zero, out-of-range results through the same double classification), its Q and clip flag timing
+(the DIV lands at the MULq seven pairs on, FCAND sees the CLIP four pairs before it), and leaves the registers,
+clip, MAC, status (ZS and SS must already be set, else the sandbox runs it) and cycles (33 + 43 per vertex + 10
+per bone, plus 2 per qword of a pending kick) as the program does. Each vertex runs without range checks and again
+on the exact path when a value leaves 2^-60..2^120.
+
+Checked bit for bit (packets, VU memory, every register, clip, MAC, status, cycles): 1500 runs recorded from a
+fight with `PS2X_VU1_RECORD_PC=0x1388` replayed by `sc3_tests` (`SC3_BUILD_TESTS=ON`, `SC3_VU1_PORT_TRACE`, both
+paths), a synthetic batch against the interpreter's digests, and `SC3_NATIVE_VU1_PORT=check` over the whole
+regress route: 1,960,411 runs, no difference. The pause still on the port matches the sandbox's in the 3D (the
+`REGRESS_NATIVE_VU1_PORT_AB` diff is the blinking pause menu only).
+
+Cost: replaying the 1500 runs, 8.1 us a run against the interpreter's 19.5 (10.8 on the exact path). Profile of
+the VIF1 thread over 15 s of an uncapped fight (same binary): B:0x1388's AOT blocks 2174 samples on the sandbox,
+754 for the C++; the thread from 7807 to 6977 samples while drawing more frames, the EE's waits for it from 2079
+to 1851. Regress, Free Training, three or six runs a side:
+
+| | Capped | Uncapped fight |
+| --- | --- | --- |
+| sandbox | 58.43-58.70 | 52.2-55.3 (mean 53.9) |
+| port | 58.97-59.30 | 51.7-56.5 (mean 54.4) |
+| VU1 | 59.28 | 58.8 |
+
+Across runs the stage changes and the spread hides the gain; inside one uncapped 90 s fight, switching between the
+two every 10 s (`SC3_NATIVE_VU1_PORT=@file`, the first 5 s after each switch left out), three fights: sandbox 53.4 /
+54.5 / 54.2 fps, port 55.5 / 56.0 / 55.9, about 1.8 fps more.
+
+What is left between the sandbox and VU1 is not the microprograms: on VU1 the same AOT code runs on the same VIF1
+thread, and its packets go to the GS thread. On the sandbox the VIF1 thread also turns them into native batches
+(`GifToNative`, about 730 samples) and keeps the texture cache (`TextureCache::uploadLocked` and `WriteCT32`, about
+1050). The next step for B:0x1388 is batches straight from the port, without building and reading back its GIF
+packet.
+
 ### Test harness and tracers
 
 - `PS2X_SC3_AUTOWIN=1`: on each GS interrupt during a fight, the player's health (float at 0x4D36A0) is set to

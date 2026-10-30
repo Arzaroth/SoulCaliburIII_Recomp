@@ -47,6 +47,19 @@ endif()
 target_sources(ps2EntryRunner PRIVATE ${SC3_GENERATED_SOURCES} ${SC3_RUNTIME_SOURCES})
 target_include_directories(ps2EntryRunner PRIVATE "${SC3_GENERATED_DIR}")
 
+option(SC3_BUILD_TESTS "Build sc3_tests: the C++ VU1 program ports against the interpreter and recorded runs" OFF)
+if(SC3_BUILD_TESTS)
+    add_executable(sc3_tests
+        tests/sc3_vu1_port_tests.cpp
+        runtime/sc3_vu1_port.cpp
+        PS2Recomp/ps2xTest/src/test_function_table.cpp)
+    target_include_directories(sc3_tests PRIVATE runtime PS2Recomp/ps2xTest/include PS2Recomp/ps2xRuntime/include)
+    target_link_libraries(sc3_tests PRIVATE ps2_runtime)
+    if(SC3_VU1_SOURCES)
+        target_sources(sc3_tests PRIVATE $<TARGET_OBJECTS:sc3_vu1_aot>)
+    endif()
+endif()
+
 list(LENGTH SC3_GENERATED_SOURCES _sc3_count)
 list(LENGTH SC3_VU1_SOURCES _sc3_vu1_count)
 list(LENGTH SC3_IOP_SOURCES _sc3_iop_count)
