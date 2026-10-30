@@ -93,7 +93,9 @@ namespace sc3
             const int isHuge = _mm256_movemask_pd(_mm256_cmp_pd(magnitude, floatMax, _CMP_GT_OQ)) & classified;
             const int negative = _mm256_movemask_pd(wide) & classified;
             alignas(16) uint32_t words[4];
+            alignas(16) float left[4], right[4], acc[4];
             _mm_store_si128(reinterpret_cast<__m128i *>(words), bits(value));
+            _mm_store_ps(left, l), _mm_store_ps(right, r), _mm_store_ps(acc, a);
             for (int lane = 0; lane < 4; ++lane)
             {
                 const int bit = 1 << lane;
@@ -101,13 +103,16 @@ namespace sc3
                     words[lane] = ((negative & bit) ? 0x80000000u : 0u) | ((isHuge & bit) ? 0x7F7FFFFFu : 0u);
                 else if (atMax & bit)
                 {
+                    const long double sum = kOp == Op::Add ? static_cast<long double>(left[lane]) + right[lane]
+                                                           : static_cast<long double>(acc[lane]) + static_cast<long double>(left[lane]) * right[lane];
                     const uint32_t sign = words[lane] & 0x80000000u;
-                    if (((words[lane] >> 23) & 0xFFu) == 0xFFu)
-                        words[lane] = sign | 0x7F7FFFFFu;
                     if (sign)
                         c.sign |= bit;
-                    if ((words[lane] & 0x7FFFFFFFu) == 0x7F7FFFFFu)
+                    if ((sum < 0.0L ? -sum : sum) > static_cast<long double>(std::numeric_limits<float>::max()))
+                    {
+                        words[lane] = sign | 0x7F7FFFFFu;
                         c.over |= bit;
+                    }
                 }
             }
             c.value = _mm_load_ps(reinterpret_cast<const float *>(words));

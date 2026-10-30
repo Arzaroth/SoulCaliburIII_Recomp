@@ -150,6 +150,13 @@ namespace
         return in;
     }
 
+    Input syntheticAtFloatMax()
+    {
+        Input in = synthetic(0u);
+        setVf(in.state, 20, 1.0e37f, 1.0e37f, 1.0e37f, 0.0f);
+        return in;
+    }
+
     std::vector<uint8_t> loadFile(const char *path)
     {
         std::ifstream file(path, std::ios::binary);
@@ -293,6 +300,7 @@ namespace
     constexpr uint64_t kSyntheticDigest = 0xbe047bc8c88e4430ull;
     constexpr uint64_t kSyntheticKickDigest = 0x9c79f7af5a8df4b4ull;
     constexpr uint64_t kSyntheticLongKickDigest = 0x6490a05c27bbd06ull;
+    constexpr uint64_t kSyntheticAtFloatMaxDigest = 0xdd0f84f44c992881ull;
 }
 
 void register_sc3_vu1_port_tests()
@@ -323,6 +331,28 @@ void register_sc3_vu1_port_tests()
                 t.Equals(digest(port), kickQwords == 0u ? kSyntheticDigest : kickQwords == 2u ? kSyntheticKickDigest : kSyntheticLongKickDigest,
                          "the digest of the interpreter's run");
             }
+        });
+
+        tc.Run("B:0x1388 sets no overflow for a sum that lands exactly on the largest float", [](TestCase &t)
+        {
+            const Input in = syntheticAtFloatMax();
+            const Result port = runPort(in);
+            const Result careful = runPort(in, false);
+            t.IsTrue(difference(port, careful.state, careful.data, careful.packets, careful.cycles).empty(),
+                     "the fast path differs from the careful one");
+            std::printf("  lights at 1e37: digest %#llx, mac %#x, status %#x\n", static_cast<unsigned long long>(digest(port)),
+                        port.state.mac, port.state.status);
+            t.Equals(port.state.mac & 0xF000u, 0u, "MAC O flags of FLT_MAX + 0 * 128");
+            t.Equals(port.state.status & 0x8u, 0u, "status O of FLT_MAX + 0 * 128");
+            const std::vector<uint8_t> code = programB();
+            if (!code.empty())
+            {
+                const Result vu = runVu(code, in);
+                const std::string diff = difference(port, vu.state, vu.data, vu.packets, vu.cycles);
+                std::printf("  interpreter digest %#llx%s\n", static_cast<unsigned long long>(digest(vu)), diff.c_str());
+                t.IsTrue(diff.empty(), "the port differs from the interpreter:" + diff);
+            }
+            t.Equals(digest(port), kSyntheticAtFloatMaxDigest, "the digest of the interpreter's run");
         });
 
         tc.Run("B:0x1388 leaves what VU1 did on every recorded run", [](TestCase &t)
