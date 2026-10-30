@@ -127,7 +127,7 @@ Tales of Souls loading screen before the last episodes stayed on a white NOW LOA
 
 ### Native VU1 output (`runtime/sc3_native.cpp`, native layer 5)
 
-Opt-in, off by default. PS2Recomp's `Vu1StreamAdapter` reads every VIF1 stream at its DMA kick and decides, for each
+On by default with the native GS renderer (`SC3_NATIVE_VU1=0` runs the programs on VU1). PS2Recomp's `Vu1StreamAdapter` reads every VIF1 stream at its DMA kick and decides, for each
 MSCAL, whether VU1 runs the program or the adapter's own VU1 (the sandbox, the same AOT code) runs it and draws its
 XGKICK packets through `GifToNative` into the GS targets, at the program's point of the GS stream.
 
@@ -160,7 +160,7 @@ XGKICK packets through `GifToNative` into the GS targets, at the program's point
 
   Hiding a program also skips what it leaves in VU memory for the next ones, so a hidden setup program takes later
   ones with it.
-- `SC3_NATIVE_VU1=1`: every program runs on the sandbox, wherever VU1 would run it (menus, character select, attract
+- `SC3_NATIVE_VU1=1` (the default): every program runs on the sandbox, wherever VU1 would run it (menus, character select, attract
   fights, Character Creation, fights), the draw-only DIRECTHL packets too (none qualify: every DIRECTHL of a fight
   carries register setup). `SC3_NATIVE_VU1_SWITCH=<file>`
   (1 sandbox, 0 VU1, read at each frame end) and `REGRESS_NATIVE_VU1_AB=1` compare the two on the frozen pause:
@@ -199,6 +199,30 @@ as on VU1 (stills on each side of a `SC3_NATIVE_VU1_SWITCH` flip; menus animate,
 
 The adapter sees about 300 k fewer MSCALs than VIF1 runs over the route, all in the load after stage select (the
 same on the game thread): those programs stay on VU1 and draw as before.
+
+The title screen was the one difference left: on the sandbox its background stayed dark navy, without the blue
+glow and the flash of the logo. Programs moved to the sandbox one at a time (`SC3_NATIVE_VU1_ONLY`) put it on A:0x10;
+a dump of that program's XGKICK packets showed draws under TEST 0x53001, an alpha test that never passes (ATST
+NEVER) with AFAIL RGB_ONLY: the GS writes their colour and keeps alpha and Z. `GifToNative` dropped them as it drops
+KEEP. Fixed on PS2Recomp `sc3/native-vu1-title` (ZB_ONLY now goes to the GS too, which masks the colour): over
+seconds 21-24 of the title the frame's mean luminance is 168/172/180/194 on both sides (150-153 before) and the
+captures' PSNR against a VU1 run equals that of two VU1 runs (26.4/22.0/18.9 dB). With only A:0x1f00 on the sandbox
+the screen had turned white; the same fix ended that.
+
+Checked against VU1 with the sandbox on, by stills on each side of a switch and by one capture a second over whole
+runs on each side: the Chronicles of the Sword story, briefing, field map, march, the battle (intro, fight, K.O.,
+BATTLE RESULT) and the field map after it; three Tales of Souls episodes (Valentine Mansion, Lakeside Coliseum,
+Clock Tower: story pages, map, intros, fights, YOU WIN); the boot movies played through (Produced by NAMCO and the
+title movie, twice each). Nothing else differs.
+
+Full regress, Free Training, 60 s fights, three runs a side (fight frames over 25 ms counted over the whole run):
+
+| | Capped fps | Uncapped fight fps | Frames over 25 ms | Empty ADX halves | Error lines |
+| --- | --- | --- | --- | --- | --- |
+| sandbox | 59.45-59.50 | 55.4-56.2 | 4-5 (uncapped 10-33) | 12-25 | 6 (the usual Sofdec / ADX ones) |
+| VU1 | 58.65-59.72 | 61.7-63.1 | 5-12 (uncapped 8-17) | 0-18 | 6 |
+
+With the title fix and the sandbox as the default: 59.42 capped, 54.9 uncapped (VU1: 59.45, 61.8).
 
 ### Test harness and tracers
 
