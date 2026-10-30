@@ -278,6 +278,13 @@ paths), a synthetic batch against the interpreter's digests, and `SC3_NATIVE_VU1
 regress route: 1,960,411 runs, no difference. The pause still on the port matches the sandbox's in the 3D (the
 `REGRESS_NATIVE_VU1_PORT_AB` diff is the blinking pause menu only).
 
+A Soul Arena mission later found a difference the regress route never shows: lights around 1e37 saturate the
+colour product to FLT_MAX, and the last MADD adds vf10 times 128 with vf10 at 0. The interpreter decides O on the
+long double sum, exactly FLT_MAX, so no overflow; the port set O (MAC 0xe000, status bit 3) for any result that
+landed on 0x7f7fffff. It now takes the long double sum too (`vu1-maxflag`). The 4,340 runs recorded in that mission
+(`SC3_NATIVE_VU1_RECORD`, check mode records only the mismatches) replay without a difference, and `sc3_tests`
+has a synthetic batch with the lights at 1e37 against the interpreter's digest.
+
 Cost: replaying the 1500 runs, 8.1 us a run against the interpreter's 19.5 (10.8 on the exact path). Profile of
 the VIF1 thread over 15 s of an uncapped fight (same binary): B:0x1388's AOT blocks 2174 samples on the sandbox,
 754 for the C++; the thread from 7807 to 6977 samples while drawing more frames, the EE's waits for it from 2079
@@ -334,6 +341,30 @@ Checked bit for bit (packets, VU memory, registers, Q and I, clip, MAC, status, 
   episodes (5.95 M), Chronicles of the Sword (6.85 M), VS Modes (4.42 M), the Shop (4.50 M) and Options (0.56 M):
   33.4 M MSCALs, no difference. Entries seen: every start pc of A but 0xda8, 0xf68, 0x2098/0x2140 and 0x2330, of B
   but 0xd8, 0xb78, 0xdd0, 0x10f0, 0x21e0/0x2290, 0x24f8 and 0x2740 (ported all the same, never run in these modes).
+- Check mode with both logs over the other modes, driven live through `PS2X_PAD_INPUT` with the Tales of Souls save
+  on the memory card: Character Creation (a new character through every tab and most equipment slots), Museum
+  (Character Profiles, the character viewer with its stage and camera), Soul Arena (Quick Play through eight
+  stages, five missions with two fighters), World Competition (tournament rounds), Tales of Souls to episode 6,
+  every character's three costumes and weapons on the character select, and Free Training on every stage of the select grid with a new
+  opponent each: 268.8 M MSCALs and 1.79 G VU0 calls. The only difference was B:0x1388's O flag above (4,340 runs,
+  one mission); with the fix, 159.4 M MSCALs of those modes again without one. The entries left:
+
+  | Entry | Calls | Reached in |
+  | --- | --- | --- |
+  | A:0x450 (A:0x10>0x450) | 13,396 | Character Creation's model and job previews, Soul Arena |
+  | A:0xf68 (direct and A:0x10>0xf68) | 215,064 | most stages' fights: Soul Arena, World Competition, Free Training |
+  | B:0xd8 (direct and B:0x10>0xd8) | 463,170 | Lizardman and others in World Competition, Soul Arena missions, Free Training |
+  | B:0xb78 (direct and B:0x10>0xb78) | 239,847 | Nightmare and others, the character select, fights |
+  | A:0xda8, A:0x2098/0x2140, A:0x2330 | 0 | never |
+  | B:0xdd0, B:0x10f0, B:0x21e0/0x2290, B:0x24f8, B:0x2740 | 0 | never |
+  | VU0 0x18, 0x438 | 0 | never |
+
+  B:0x21e0's routines are the 0x1990 family's (fighter parts) with ST from the normal instead of lit colours, an
+  environment map; A:0x2098 is a copy of A:0x1c80's setup (the weapons' shine) for 0x2140 and 0x2330. VU0 0x18 is
+  the 16-bit angle sine at 0x100a18 (reached from 0x100aa8, cosine), 0x438 a test from the VU0 macro-mode copy of
+  the VU1 pipeline at 0x4437c8-0x444450; neither EE path ran. Not tried: Chronicles past its first battles, Tales
+  of Souls' last episodes and credits (`PS2X_SC3_AUTOWIN` lost episode 6 to a ring out), unlockable characters and
+  Museum items this save does not have, Critical Finish.
 
 Cost, replaying the route's runs on stallman: 2.5-8 us a run for A's entries against the sandbox's 5.3-13.5, 7-16 us
 for B's against 13-30. Regress, Free Training, two runs a side, on the same runtime (PS2Recomp 4ebc8e3a), every
@@ -361,7 +392,7 @@ and `SC3_NATIVE_VU0_RECORD` log and record as for VU1.
 
 Checked: the route's 7,732 recorded runs replayed by `sc3_tests` (`SC3_VU0_TRACE`), 0.15-0.36 us a run, and
 `SC3_NATIVE_VU0=check` over the same seven runs as VU1 above: 197.4 M calls, no difference, none left to the
-interpreter. 0x18 and 0x438 never ran.
+interpreter. 0x18 and 0x438 never ran, in those modes or in the ones above.
 
 ### Test harness and tracers
 
