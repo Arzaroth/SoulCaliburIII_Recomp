@@ -1,8 +1,20 @@
-#include "sc3_vu1_ops.h"
+#include "sc3_vu1_port.h"
+
+#include "runtime/ps2_vu1_lifted_ops.h"
 
 #include <algorithm>
 #include <cstring>
 #include <iterator>
+
+namespace ps2x::vu1lift
+{
+    template <bool kSticky>
+    uint64_t programA(uint32_t entry, VU1State &state, uint8_t *data, uint32_t top, Vu1Kick out, void *user);
+    template <bool kSticky>
+    uint64_t programVu0(uint32_t entry, VU1State &state, uint8_t *data, uint32_t top, Vu1Kick out, void *user);
+    template <bool kSticky>
+    uint64_t programB(uint32_t entry, VU1State &state, uint8_t *data, uint32_t top, Vu1Kick out, void *user);
+}
 
 namespace sc3
 {
@@ -21,12 +33,6 @@ namespace sc3
 
     namespace vu1
     {
-        template <bool kSticky>
-        uint64_t programA(uint32_t entry, VU1State &state, uint8_t *data, uint32_t top, Vu1Kick out, void *user);
-        template <bool kSticky>
-        uint64_t programVu0(uint32_t entry, VU1State &state, uint8_t *data, uint32_t top, Vu1Kick out, void *user);
-        template <bool kSticky>
-        uint64_t programB(uint32_t entry, VU1State &state, uint8_t *data, uint32_t top, Vu1Kick out, void *user);
 
         constexpr uint32_t kEntriesA[] = {0x10u, 0xd8u, 0x2b0u, 0x450u, 0x768u, 0xa48u, 0xc18u, 0xda8u, 0xf68u, 0x1268u,
                                           0x1558u, 0x1730u, 0x18c0u, 0x1ab8u, 0x1c80u, 0x1d28u, 0x1f00u, 0x2098u, 0x2140u, 0x2330u};
@@ -75,13 +81,13 @@ namespace sc3
     {
         if (program == kProgramB && pc == kSkinnedBodyPc && skinnedBodyReady(state))
             return runSkinnedBody(state, data, top, itop, kick, user);
-        const vu1::RoundTowardZero rounding;
+        const ps2x::vu1lift::RoundTowardZero rounding;
         const bool sticky = (state.status & 0x0C0u) != 0x0C0u;
         uint64_t cycles;
         if (program == kProgramA)
-            cycles = sticky ? vu1::programA<true>(pc, state, data, top, kick, user) : vu1::programA<false>(pc, state, data, top, kick, user);
+            cycles = sticky ? ps2x::vu1lift::programA<true>(pc, state, data, top, kick, user) : ps2x::vu1lift::programA<false>(pc, state, data, top, kick, user);
         else
-            cycles = sticky ? vu1::programB<true>(pc, state, data, top, kick, user) : vu1::programB<false>(pc, state, data, top, kick, user);
+            cycles = sticky ? ps2x::vu1lift::programB<true>(pc, state, data, top, kick, user) : ps2x::vu1lift::programB<false>(pc, state, data, top, kick, user);
         state.top = top;
         state.itop = itop;
         return cycles;
@@ -91,10 +97,10 @@ namespace sc3
 
     uint64_t runVu0Program(uint64_t, uint32_t pc, VU1State &state, uint8_t *data)
     {
-        const vu1::RoundTowardZero rounding;
+        const ps2x::vu1lift::RoundTowardZero rounding;
         const bool sticky = (state.status & 0x0C0u) != 0x0C0u;
-        const uint64_t cycles = sticky ? vu1::programVu0<true>(pc, state, data, 0u, nullptr, nullptr)
-                                       : vu1::programVu0<false>(pc, state, data, 0u, nullptr, nullptr);
+        const uint64_t cycles = sticky ? ps2x::vu1lift::programVu0<true>(pc, state, data, 0u, nullptr, nullptr)
+                                       : ps2x::vu1lift::programVu0<false>(pc, state, data, 0u, nullptr, nullptr);
         state.top = 0u;
         return cycles;
     }

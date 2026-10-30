@@ -34,7 +34,7 @@ if(SC3_VU1_SOURCES)
     target_sources(ps2EntryRunner PRIVATE $<TARGET_OBJECTS:sc3_vu1_aot>)
 endif()
 
-# SC3's VU1 programs as C++ (scripts/vu1_port_gen.py, run by scripts/recomp.sh).
+# SC3's VU1 programs as C++ (PS2Recomp/tools/vu1_lift.py on recomp/vu1_lift_spec.json, run by scripts/recomp.sh).
 file(GLOB SC3_VU1_PORT_SOURCES CONFIGURE_DEPENDS "${SC3_GENERATED_DIR}/vu1port/*.cpp")
 if(NOT SC3_VU1_PORT_SOURCES)
     message(FATAL_ERROR "No VU1 program ports in ${SC3_GENERATED_DIR}/vu1port. Run scripts/recomp.sh first.")
