@@ -6,6 +6,8 @@ struct VU1State;
 
 namespace sc3
 {
+    class DrawSink;
+
     constexpr uint32_t kSkinnedBodyPc = 0x1388u;
 
     using Vu1Kick = void (*)(void *user, const uint8_t *packet, uint32_t bytes);
@@ -15,6 +17,7 @@ namespace sc3
     // Status must already hold ZS and SS (skinnedBodyReady): their sticky updates are not computed.
     uint64_t runSkinnedBody(VU1State &state, uint8_t *data, uint32_t top, uint32_t itop, Vu1Kick kick, void *user, bool fast = true);
     bool skinnedBodyReady(const VU1State &state);
+    uint64_t drawSkinnedBody(VU1State &state, uint8_t *data, uint32_t top, uint32_t itop, DrawSink &sink);
 
     // SC3's VU1 programs, A (0) and B (1), from a start pc as VU1Interpreter runs them (registers, flags, memory,
     // packets, cycles). A start pc whose setup jumps on (JR) is ported for the targets the port knows.
@@ -23,6 +26,7 @@ namespace sc3
     bool vu1Ported(uint32_t program, uint32_t pc, const uint8_t *data, uint32_t top);
     uint64_t runVu1Program(uint32_t program, uint32_t pc, VU1State &state, uint8_t *data, uint32_t top, uint32_t itop, Vu1Kick kick,
                            void *user);
+    uint64_t drawVu1Program(uint32_t program, uint32_t pc, VU1State &state, uint8_t *data, uint32_t top, uint32_t itop, DrawSink &sink);
 
     // SC3's VU0 microprograms (VCALLMS), by the hash of VU0's 4 KB of code memory and the start pc: VU0 as
     // VU1Interpreter runs it from a reset, on its 4 KB of data memory. Returns the VU cycles.

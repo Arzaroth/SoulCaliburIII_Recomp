@@ -1,3 +1,4 @@
+#include "sc3_draw_sink.h"
 #include "sc3_vu1_port.h"
 
 #include "runtime/ps2_vu1_inline.h"
@@ -329,6 +330,36 @@ namespace sc3
             return bytes;
         }
 
+        template <bool kDirect>
+        struct Packet
+        {
+            const Memory &m;
+            DrawSink *sink;
+
+            template <int kRole, int kDest>
+            void sq(int32_t qword, __m128 value) const
+            {
+                if constexpr (kDirect)
+                    sink->put<kRole, kDest>(qword, value);
+                else
+                    m.sq<kDest>(qword, value);
+            }
+            void positionFlags(int32_t qword, int32_t value) const
+            {
+                if constexpr (kDirect)
+                    sink->put<DrawSink::Xyz, W>(qword, _mm_castsi128_ps(_mm_set1_epi32(static_cast<uint16_t>(value & 0xFFFF))));
+                else
+                    m.isw(qword, 3, value);
+            }
+            uint32_t kick(const uint8_t *data, int32_t vi, Vu1Kick out, void *user) const
+            {
+                if constexpr (kDirect)
+                    return sink->kick(vi) * 16u;
+                else
+                    return kickPacket(data, vi, out, user);
+            }
+        };
+
         struct RoundTowardZero
         {
             unsigned int saved = _mm_getcsr();
@@ -569,10 +600,14 @@ namespace sc3
 
     bool skinnedBodyReady(const VU1State &state) { return (state.status & 0x0C0u) == 0x0C0u; }
 
-    uint64_t runSkinnedBody(VU1State &state, uint8_t *data, uint32_t top, uint32_t itop, Vu1Kick kick, void *user, bool fast)
+    template <bool kDirect>
+    uint64_t skinnedBody(VU1State &state, uint8_t *data, uint32_t top, uint32_t itop, Vu1Kick kick, void *user, bool fast)
     {
         const RoundTowardZero rounding;
         const Memory m{data};
+        const Packet<kDirect> packet{m, static_cast<DrawSink *>(user)};
+        if constexpr (kDirect)
+            packet.sink->begin(data, top, 0xEEu);
         Flags f;
         const __m128 zero = _mm_setzero_ps();
         const __m128 vf0 = _mm_setr_ps(0.0f, 0.0f, 0.0f, 1.0f);
@@ -656,10 +691,10 @@ namespace sc3
             }
             firstLight = false;
             vi9 = i16(vi9 - 1);
-            m.isw(vi11 + 2, 3, l.adc);
-            m.sq<XYZW>(vi11, l.vf7);
-            m.sq<XYZW>(vi11 + 1, l.vf9);
-            m.sq<XYZ>(vi11 + 2, l.vf6);
+            packet.positionFlags(vi11 + 2, l.adc);
+            packet.template sq<DrawSink::St, XYZW>(vi11, l.vf7);
+            packet.template sq<DrawSink::Rgba, XYZW>(vi11 + 1, l.vf9);
+            packet.template sq<DrawSink::Xyz, XYZ>(vi11 + 2, l.vf6);
             vi11 = i16(vi11 + 3);
         } while (i16(vi9) > 0);
 
@@ -673,23 +708,23 @@ namespace sc3
         l.vf7 = o.mul<XYZ>(l.vf7, norm(l.vf3), _mm_set1_ps(normalizeOperand(l.q)));
         l.vi1 = i16(l.vi1 + k.vi3);
         l.acc = o.mul<XYZW>(l.acc, l.vf8, norm(l.vf4));
-        m.isw(vi11 + 2, 3, l.vi1);
+        packet.positionFlags(vi11 + 2, l.vi1);
         uint32_t mac = 0u, current = 0u;
         l.vf9 = maddLive(f, l.acc, l.vf10, _mm_set1_ps(128.0f), mac, current);
-        m.sq<XYZW>(vi15, vf13);
+        packet.template sq<DrawSink::Tag, XYZW>(vi15, vf13);
         l.vf9 = miniv<XYZW>(l.vf9, l.vf9, bc<0>(k.vf17raw));
-        m.sq<XYZ>(vi11 + 2, l.vf6);
+        packet.template sq<DrawSink::Xyz, XYZ>(vi11 + 2, l.vf6);
         l.vf9 = ftoi<1, XYZW>(l.vf9, norm(l.vf9));
-        m.sq<XYZW>(vi11, l.vf7);
-        m.sq<XYZW>(vi11 + 1, l.vf9);
+        packet.template sq<DrawSink::St, XYZW>(vi11, l.vf7);
+        packet.template sq<DrawSink::Rgba, XYZW>(vi11 + 1, l.vf9);
         uint64_t cycles = 33u + 43u * vertices + 10u * s.influences;
         if (i16(vi6) != 0)
         {
             vi6 = i16(vi6 + vi2);
-            cycles += 2u * (kickPacket(data, vi6, kick, user) / 16u);
+            cycles += 2u * (packet.kick(data, vi6, kick, user) / 16u);
             vi6 = 0;
         }
-        kickPacket(data, vi15, kick, user);
+        packet.kick(data, vi15, kick, user);
 
         store(state.vf[1], s.vf1), store(state.vf[2], l.vf2), store(state.vf[3], l.vf3), store(state.vf[4], l.vf4);
         store(state.vf[5], l.vf5), store(state.vf[6], l.vf6), store(state.vf[7], l.vf7), store(state.vf[8], l.vf8);
@@ -709,5 +744,15 @@ namespace sc3
         state.itop = itop;
         state.pc = 0x15E8u;
         return cycles;
+    }
+
+    uint64_t runSkinnedBody(VU1State &state, uint8_t *data, uint32_t top, uint32_t itop, Vu1Kick kick, void *user, bool fast)
+    {
+        return skinnedBody<false>(state, data, top, itop, kick, user, fast);
+    }
+
+    uint64_t drawSkinnedBody(VU1State &state, uint8_t *data, uint32_t top, uint32_t itop, DrawSink &sink)
+    {
+        return skinnedBody<true>(state, data, top, itop, nullptr, &sink, true);
     }
 }

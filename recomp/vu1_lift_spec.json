@@ -1,4 +1,9 @@
 {
+  "sink": {
+    "class": "sc3::DrawSink",
+    "include": "sc3_draw_sink.h",
+    "limit": "0x19f"
+  },
   "programs": {
     "A": {
       "hash": "0x95e81f9a833c1b45",
@@ -45,7 +50,8 @@
         "0x1f00",
         "0x2140",
         "0x2330"
-      ]
+      ],
+      "sink": true
     },
     "B": {
       "hash": "0xd2fbf7af837a8df4",
@@ -88,7 +94,8 @@
         "0x2290",
         "0x24f8",
         "0x2740"
-      ]
+      ],
+      "sink": true
     },
     "VU0": {
       "hash": "0x5f8cbf2471656edf",
