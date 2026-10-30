@@ -12,6 +12,7 @@
 #include <cstring>
 #include <deque>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -1201,6 +1202,31 @@ namespace
         return next;
     }
 
+    void endNativeFrame(PS2Runtime *runtime, std::function<void(R5900Context &)> resume)
+    {
+        static const bool trace = std::getenv("SC3_TRACE_FRAMES") != nullptr;
+        static const bool sleep = [] { const char *v = std::getenv("SC3_FRAME_SLEEP"); return v && v[0] == '1'; }();
+        followFrameCapFile(runtime);
+        if (sleep)
+        {
+            const auto deadline = nextFrameDeadline(runtime);
+            if (deadline > std::chrono::steady_clock::now())
+                runtime->eeScheduler().waitHostDeadline(
+                    deadline,
+                    [runtime]
+                    {
+                        const double step = nativeFrameEnd(runtime);
+                        if (trace)
+                            traceFrame(runtime, step);
+                    },
+                    std::move(resume));
+        }
+        runtime->framePacer().frameEnd();
+        const double step = nativeFrameEnd(runtime);
+        if (trace)
+            traceFrame(runtime, step);
+    }
+
     // The main loop (0x12db20) ends its frame with an inline Timer 3 wait on 0x148098 until the lines elapsed since
     // the last frame reach its target (sp+0x30), then calls it once more to record the frame's length.
     void frameEndElapsedLines(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -1217,41 +1243,23 @@ namespace
         }
         if (ra == kFrameEndReturn && !std::exchange(g_frameEndWoken, false))
         {
-            static const bool trace = std::getenv("SC3_TRACE_FRAMES") != nullptr;
             EeScheduler &scheduler = runtime->eeScheduler();
             const bool wasNative = scheduler.nativeFrames();
             followMovies(runtime);
-            followFrameCapFile(runtime);
             if (scheduler.nativeFrames() && !wasNative)
             {
                 g_frameEndCycle = scheduler.currentCycle();
                 g_eeLead = 0;
                 hostFrameStep();
             }
-            static const bool sleep = [] { const char *v = std::getenv("SC3_FRAME_SLEEP"); return v && v[0] == '1'; }();
-            const auto deadline = sleep && scheduler.nativeFrames() ? nextFrameDeadline(runtime)
-                                                                    : std::chrono::steady_clock::time_point{};
-            if (scheduler.nativeFrames() && deadline > std::chrono::steady_clock::now())
-            {
-                scheduler.waitHostDeadline(
-                    deadline,
-                    [runtime]
-                    {
-                        const double step = nativeFrameEnd(runtime);
-                        if (trace)
-                            traceFrame(runtime, step);
-                    },
-                    [](R5900Context &resume)
-                    {
-                        g_frameEndWoken = true;
-                        resume.pc = kElapsedLines;
-                    });
-            }
             if (scheduler.nativeFrames())
-                runtime->framePacer().frameEnd();
-            const double step = scheduler.nativeFrames() ? nativeFrameEnd(runtime) : hostFrameStep();
-            if (trace)
-                traceFrame(runtime, step);
+                endNativeFrame(runtime, [](R5900Context &resume)
+                               {
+                                   g_frameEndWoken = true;
+                                   resume.pc = kElapsedLines;
+                               });
+            else if (std::getenv("SC3_TRACE_FRAMES"))
+                traceFrame(runtime, hostFrameStep());
         }
         g_frameEndElapsedLines(rdram, ctx, runtime);
     }
