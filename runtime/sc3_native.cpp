@@ -266,11 +266,12 @@ namespace sc3
     {
         const char *value = std::getenv("SC3_NATIVE_VU1");
         const char *hide = std::getenv("SC3_NATIVE_VU1_HIDE");
-        const bool on = value && *value && *value != '0';
+        const bool unset = !value || !*value;
+        const bool on = unset ? nativeGs : *value != '0';
         if (!on && !(hide && *hide))
             return;
         State &s = g_state;
-        s.mode = value && std::strcmp(value, "1") == 0 ? Mode::Sandbox : Mode::Observe;
+        s.mode = on && (unset || std::strcmp(value, "1") == 0) ? Mode::Sandbox : Mode::Observe;
         s.sandbox = s.mode == Mode::Sandbox;
         if (const char *path = std::getenv("SC3_NATIVE_VU1_SWITCH"); path && *path && s.mode == Mode::Sandbox)
         {
