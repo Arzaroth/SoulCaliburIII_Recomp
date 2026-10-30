@@ -31,7 +31,7 @@ Not an emulator: the game's own MIPS R5900 code, rebuilt as a native program on 
 ## Status
 
 **Playable from start to finish in automated tests, now in human testing.** The port runs on PS2Recomp's native
-target: the GS stream drawn with OpenGL, the VU1 microprograms on the native sandbox, the IOP modules recompiled, the SPU2 on the wall clock, the frame loop on real time. Fights run at about
+target: the GS stream drawn with OpenGL, the VU1 microprograms on the native sandbox, the IOP modules recompiled, the IOP and the SPU2 on the wall clock, the frame loop and the movies on real time. Fights run at about
 60 frames per second on a Ryzen 7 7800X3D, with music and voices. Every mode has been played through with scripted input: Tales
 of Souls to the credits, Chronicles of the Sword battles on the field map, World Competition, Soul Arena, Museum,
 Character Creation, Shop and Options, with saves loaded back after a restart. The game runs its own `rand`: the
@@ -50,7 +50,7 @@ Character Creation, Shop and Options, with saves loaded back after a restart. Th
 | Memory card: save and load | ✅ |
 | Random picks (the game's own `rand`) | ✅ |
 | Long play sessions by a human | 🔧 |
-| Native GS renderer (OpenGL), recompiled IOP modules, SPU2 on the wall clock | ✅ |
+| Native GS renderer (OpenGL), recompiled IOP modules, IOP and SPU2 on the wall clock | ✅ |
 | Higher internal resolution (`PS2X_GS_SCALE`) | ✅ |
 | Frame loop on the native FramePacer | ✅ |
 | VU1 microprograms on the native sandbox, no emulated VU1 | ✅ |
@@ -75,8 +75,13 @@ branch: `native/renderer` plus the SC3 fixes below, on their way into `native/re
   none left to the interpreter); `PS2X_IOP_NATIVE=0` interprets them again.
 - **SPU2 on the wall clock** by default (`PS2X_SPU2_WALLCLOCK=1` in the scripts), with an AutoDMA fix so the ADX
   stream gets each half's interrupt in time, and kept within 512 samples of the IOP clock.
+- **IOP on the wall clock** by default (`PS2X_IOP_WALLCLOCK=1`, set by the game override; `=0` puts it back on the
+  EE cycles the game accounts): its timers, vblank interrupts and sound driver ticks follow real time, at no cost in
+  fps (59.8 capped, 58.6 with the fight uncapped, against 59.3 and 57.8 on the EE clock).
 - **Frame loop on real time** by default: the main loop's frames are paced by PS2Recomp's FramePacer and shown when
-  the game ends them, not on the vblank grid (`SC3_NATIVE_FRAMES=0` goes back to it). `PS2X_FRAME_CAP` sets the cap
+  the game ends them, not on the vblank grid (`SC3_NATIVE_FRAMES=0` goes back to it). One-shot movies too: their loop
+  ends its frames in a vsync wait of CRI's ADXM, which the override turns into the same native frame end, so they
+  play at their 29.97 pictures a second on the host's clock, with their sound in step. `PS2X_FRAME_CAP` sets the cap
   (60 by default, 0 = unlimited).
 - **VU1 microprograms on the native sandbox** by default: PS2Recomp's `Vu1StreamAdapter` runs every MSCAL of the
   VIF1 stream on its own copy of the AOT-compiled programs, on the VIF1 thread, and hands their XGKICK packets to the
@@ -195,6 +200,7 @@ player 2:
 | `PS2X_GS_RENDERER=cpu` | Draw with the CPU rasterizer, the reference, instead of the native GS back end |
 | `PS2X_GS_SCALE=<n>` | Internal resolution multiplier of the native GS back end |
 | `PS2X_IOP_NATIVE=0` | Interpret the IRX modules instead of running their recompiled code |
+| `PS2X_IOP_WALLCLOCK=0` | Run the IOP on the EE cycles the game accounts instead of the host's clock |
 | `SC3_NATIVE_VU1=0` | Run the VU1 microprograms on the emulated VU1 instead of the native sandbox |
 | `SC3_NATIVE_VU1_PORT=0\|check` | Run the fighters' skinned bodies (B:0x1388) on the sandbox instead of in C++, or both, compared |
 | `PS2X_VIF1_THREAD=0` | Run VIF1 and the VU1 microcode on the game thread (default: their own thread, about a third faster in fights) |
