@@ -160,8 +160,9 @@ XGKICK packets through `GifToNative` into the GS targets, at the program's point
 
   Hiding a program also skips what it leaves in VU memory for the next ones, so a hidden setup program takes later
   ones with it.
-- `SC3_NATIVE_VU1=1`: in fights (both health bars alive) every program runs on the sandbox, the draw-only DIRECTHL
-  packets too (none qualify: every DIRECTHL of a fight carries register setup). `SC3_NATIVE_VU1_SWITCH=<file>`
+- `SC3_NATIVE_VU1=1`: every program runs on the sandbox, wherever VU1 would run it (menus, character select, attract
+  fights, Character Creation, fights), the draw-only DIRECTHL packets too (none qualify: every DIRECTHL of a fight
+  carries register setup). `SC3_NATIVE_VU1_SWITCH=<file>`
   (1 sandbox, 0 VU1, read at each frame end) and `REGRESS_NATIVE_VU1_AB=1` compare the two on the frozen pause:
   `pause_native_psnr` against `pause_floor_psnr` (two VU1 stills of the same pause). `SC3_NATIVE_VU1_ONLY` keeps the
   programs it does not list on VU1.
@@ -175,10 +176,29 @@ the fighters drawn. Weapon trails, hit sparks and guard flashes show in captures
 `SC3_NATIVE_VU1_GSWRITES=0` draws through the native renderer's own pass instead (20 dB, after the
 `sc3/native-gif-blend` fixes: Ad blends, A == B opaque, As stored, TFX / TCC, REGION_REPEAT / REGION_CLAMP windows).
 
-Speed in Free Training: 42.3 fps capped and 43-44 with the fight uncapped (`REGRESS_FIGHT_FRAME_CAP=0`) on the
-sandbox, against 59.8 and 64-69 on VU1. The sandbox's microprograms run on the game thread, which also waits for the
-VIF1 worker (`waitForVif1Clock`) as before. The fight test is approximate: both health words stay at 240 from the
-title's attract fight on, so the sandbox also runs in the menus after it (they draw the same).
+The adapter runs on the VIF1 worker (`Config::onVif1Thread`, PS2Recomp `sc3/native-vu1-worker`;
+`SC3_NATIVE_VU1_THREAD=0` keeps it on the game thread): VIF1 hands it the stream up to each MSCAL as it gets there, so
+the sandbox runs each program at its place among VIF1's commands, on VU1's own memory (no second unpack), and moves
+the worker's clock on by the program's cycles as VU1 did; the frame end's switch, hide file, report and publish are
+queued behind the frame's transfers. Free Training, 30 s fights:
+
+| Build | Capped | Uncapped fight | EE waits for VIF1 (per 5 s) |
+| --- | --- | --- | --- |
+| VU1 | 59.6-59.8 | 63.0 (53.7-68.4) | 1.4-1.6 s |
+| sandbox on the game thread (before) | 40.9-42.3 | 43.1-43.4 | 1.2 s |
+| same, `PS2X_VIF1_SLACK=1e8` | 43.8 | 45.7 | |
+| on the VIF1 worker, clock moved at the gates | 37.7 | 40.7 | 3.0 s |
+| on the worker, clock moved as each program runs | 53.2 | 54.2 | 2.7 s |
+| on the worker, stream handed up to each MSCAL | 58.5 | 55.9 | 2.0 s |
+| same, on VU1's own memory | 59.7-59.8 | 54.3-55.1 | 1.9 s |
+
+Uncapped, the sandbox stays about 8 fps under VU1: its GifToNative work (about 1 ms a frame) now runs on the VIF1
+worker, where VU1's packets went to the GS thread. The pause still matches VU1 (33.9 dB against a floor of 33.1).
+Every screen of the regress route, the title's attract fights and Character Creation look the same on the sandbox
+as on VU1 (stills on each side of a `SC3_NATIVE_VU1_SWITCH` flip; menus animate, so compared by eye).
+
+The adapter sees about 300 k fewer MSCALs than VIF1 runs over the route, all in the load after stage select (the
+same on the game thread): those programs stay on VU1 and draw as before.
 
 ### Test harness and tracers
 
