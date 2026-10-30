@@ -1,4 +1,5 @@
 #include "sc3_native.h"
+#include "sc3_draw_sink.h"
 #include "sc3_vu1_port.h"
 
 #include "ps2_runtime.h"
@@ -74,6 +75,7 @@ namespace sc3
         {
             std::unordered_map<uint64_t, uint64_t> calls, fallbacks, mismatched;
             uint64_t frames = 0, mscals = 0, resumed = 0, codeChanges = 0, sandboxed = 0, hidden = 0, ported = 0, checked = 0, mismatches = 0;
+            uint64_t directChecked = 0, directMismatches = 0;
             uint64_t frameMin = ~0ull, frameMax = 0, frameCalls = 0;
         };
 
@@ -94,6 +96,8 @@ namespace sc3
             bool onVif1Thread = false;
             Port port = Port::Off;
             std::string portPath;
+            Port direct = Port::Off;
+            std::string directPath;
             bool portNext = false;
             uint32_t portProgram = 0;
             uint64_t portEntry = 0;
@@ -201,8 +205,10 @@ namespace sc3
                     s.portEntry = entry;
                     return Vu1StreamAdapter::Choice::Port;
                 }
-                ++s.stats.sandboxed;
                 ++s.stats.fallbacks[entry];
+                if (s.direct == Port::On)
+                    return Vu1StreamAdapter::Choice::Vu1;
+                ++s.stats.sandboxed;
                 if (sampleRecord(entry))
                 {
                     s.recordNext = true;
@@ -367,6 +373,99 @@ namespace sc3
             writeVu1TraceRecord(s.record, record);
         }
 
+        uint64_t runDirect(Vu1StreamAdapter &adapter, uint32_t pc)
+        {
+            VU1Interpreter &vu = adapter.sandbox().vu();
+            Vu1Lifted::landQueued(vu);
+            VU1State &state = vu.state();
+            const uint64_t cycles = drawVu1Program(g_state.portProgram, pc, state, adapter.dataMemory(), adapter.top(), adapter.itop(), drawSink());
+            Vu1Lifted::setClip(vu, state.clip);
+            Vu1Lifted::advanceTo(vu, Vu1Lifted::cycle(vu) + cycles);
+            state.cycles = Vu1Lifted::cycle(vu);
+            return cycles;
+        }
+
+        std::string drawDifference(const std::vector<DrawSink::Draw> &a, const std::vector<DrawSink::Draw> &b)
+        {
+            if (a.size() != b.size())
+                return " draws " + std::to_string(a.size()) + "/" + std::to_string(b.size());
+            for (size_t i = 0; i < a.size(); ++i)
+            {
+                const ps2x::native::GsMaterial &x = a[i].material, &y = b[i].material;
+                const auto prim = [](const GSPrimReg &p)
+                { return p.type | (p.iip << 3) | (p.tme << 4) | (p.fge << 5) | (p.abe << 6) | (p.aa1 << 7) | (p.fst << 8) | (p.ctxt << 9) | (p.fix << 10); };
+                const auto tex0 = [](const GSTex0Reg &t)
+                { return std::make_tuple(t.tbp0, t.tbw, t.psm, t.tw, t.th, t.tcc, t.tfx, t.cbp, t.cpsm, t.csm, t.csa, t.cld); };
+                if (prim(x.prim) != prim(y.prim) || tex0(x.tex0) != tex0(y.tex0) || x.tex1 != y.tex1 || x.clamp != y.clamp ||
+                    x.alpha != y.alpha || x.test != y.test || x.miptbp1 != y.miptbp1 || x.miptbp2 != y.miptbp2 || x.loadClut != y.loadClut)
+                    return " material of draw " + std::to_string(i);
+                if (a[i].triangles.size() != b[i].triangles.size())
+                    return " vertices of draw " + std::to_string(i);
+                for (size_t v = 0; v < a[i].triangles.size(); ++v)
+                {
+                    const ps2x::native::GsVertex &p = a[i].triangles[v], &q = b[i].triangles[v];
+                    const auto bits = [](float f) { uint32_t u; std::memcpy(&u, &f, 4); return u; };
+                    if (bits(p.x) != bits(q.x) || bits(p.y) != bits(q.y) || p.z != q.z || bits(p.s) != bits(q.s) || bits(p.t) != bits(q.t) ||
+                        bits(p.q) != bits(q.q) || p.rgba != q.rgba || p.fog != q.fog)
+                        return " vertex " + std::to_string(v) + " of draw " + std::to_string(i);
+                }
+            }
+            return {};
+        }
+
+        void checkDirect(Vu1StreamAdapter &adapter, uint32_t pc)
+        {
+            State &s = g_state;
+            VU1Interpreter &vu = adapter.sandbox().vu();
+            Vu1Lifted::landQueued(vu);
+            uint8_t *data = adapter.dataMemory();
+            const uint32_t top = adapter.top(), itop = adapter.itop();
+            static std::vector<uint8_t> s_directData(kVuMemory), s_packetData(kVuMemory);
+            static std::vector<std::vector<uint8_t>> s_packets;
+            std::memcpy(s_directData.data(), data, kVuMemory);
+            std::memcpy(s_packetData.data(), data, kVuMemory);
+            VU1State directState = vu.state(), packetState = vu.state();
+            std::vector<DrawSink::Draw> direct, reference;
+            DrawSink trial = drawSink();
+            trial.capture(&direct);
+            const uint64_t directCycles = drawVu1Program(s.portProgram, pc, directState, s_directData.data(), top, itop, trial);
+            s_packets.clear();
+            const uint64_t packetCycles =
+                runVu1Program(s.portProgram, pc, packetState, s_packetData.data(), top, itop, kickToList, &s_packets);
+            DrawSink &sink = drawSink();
+            sink.capture(&reference);
+            for (const std::vector<uint8_t> &packet : s_packets)
+                sink.replay(packet.data(), packet.size());
+            sink.capture(nullptr);
+            ++s.stats.directChecked;
+            std::string difference = stateDifference(directState, packetState) + drawDifference(direct, reference);
+            if (directCycles != packetCycles)
+                difference += " cycles " + std::to_string(directCycles) + "/" + std::to_string(packetCycles);
+            for (uint32_t q = 0; q < 1024u; ++q)
+            {
+                const uint32_t offset = (q - top) & 0x3FFu;
+                if (offset >= 0xE0u && offset < 0x19Fu)
+                    continue;
+                if (std::memcmp(s_directData.data() + q * 16u, s_packetData.data() + q * 16u, 16u) != 0)
+                {
+                    difference += " memory at " + std::to_string(q);
+                    break;
+                }
+            }
+            if (!difference.empty())
+            {
+                ++s.stats.directMismatches;
+                ++s.stats.mismatched[s.portEntry];
+                static int s_logged = 0;
+                if (s_logged++ < 50)
+                    std::fprintf(stderr, "[sc3:vu1] direct %s differs from its packets at TOP %#x:%s\n", keyName(s.portEntry).c_str(), top,
+                                 difference.c_str());
+            }
+            ps2x::native::GifToNative &gif = adapter.sandbox().gif();
+            adapter.addPortCycles(runPort(adapter, pc, kickToGif, &gif));
+            gif.flush();
+        }
+
         void drawPort(Vu1StreamAdapter &adapter, uint32_t pc, bool resumed)
         {
             State &s = g_state;
@@ -390,6 +489,16 @@ namespace sc3
                 checkPort(adapter, pc);
                 return;
             }
+            if (s.direct == Port::On)
+            {
+                adapter.addPortCycles(runDirect(adapter, pc));
+                return;
+            }
+            if (s.direct == Port::Check)
+            {
+                checkDirect(adapter, pc);
+                return;
+            }
             adapter.addPortCycles(runPort(adapter, pc, kickToGif, &gif));
             gif.flush();
         }
@@ -399,6 +508,23 @@ namespace sc3
             if (value == "check")
                 return Port::Check;
             return !value.empty() && value != "0" ? Port::On : Port::Off;
+        }
+
+        void followDirectFile()
+        {
+            State &s = g_state;
+            if (s.directPath.empty())
+                return;
+            std::ifstream file(s.directPath);
+            std::string value;
+            if (!std::getline(file, value))
+                return;
+            const Port direct = parsePort(value);
+            if (direct != s.direct)
+                std::cerr << "[sc3] native VU1: programs drawn "
+                          << (direct == Port::Off ? "from their packets" : direct == Port::On ? "directly" : "directly, checked against their packets")
+                          << " from the next frame" << std::endl;
+            s.direct = direct;
         }
 
         void followPortFile()
@@ -447,6 +573,20 @@ namespace sc3
                              static_cast<unsigned long long>(st.checked), static_cast<unsigned long long>(st.mismatches),
                              static_cast<unsigned long long>(st.resumed), line.c_str());
             }
+            if (s.log && s.direct != Port::Off)
+            {
+                DrawSink &sink = drawSink();
+                const DrawSink::Stats &d = sink.stats();
+                std::fprintf(stderr,
+                             "[sc3:vu1] %.1f s: direct kicks %llu, A+D blocks %llu, triangles %llu, foreign packets %llu, unknown registers %llu, "
+                             "other primitives %llu, overflows %llu; checked %llu, mismatches %llu\n",
+                             seconds, static_cast<unsigned long long>(d.kicks), static_cast<unsigned long long>(d.materials),
+                             static_cast<unsigned long long>(d.triangles), static_cast<unsigned long long>(d.foreign),
+                             static_cast<unsigned long long>(d.unknownRegisters), static_cast<unsigned long long>(d.badPrims),
+                             static_cast<unsigned long long>(d.overflows), static_cast<unsigned long long>(st.directChecked),
+                             static_cast<unsigned long long>(st.directMismatches));
+                sink.resetStats();
+            }
             if (!st.fallbacks.empty())
             {
                 std::vector<std::pair<uint64_t, uint64_t>> fallbacks(st.fallbacks.begin(), st.fallbacks.end());
@@ -458,8 +598,8 @@ namespace sc3
                     line += " " + keyName(entry) + " x" + std::to_string(count);
                     total += count;
                 }
-                std::fprintf(stderr, "[sc3:vu1] %.1f s: %llu MSCALs on the sandbox:%s\n", seconds, static_cast<unsigned long long>(total),
-                             line.c_str());
+                std::fprintf(stderr, "[sc3:vu1] %.1f s: %llu MSCALs without a C++ port, %s:%s\n", seconds, static_cast<unsigned long long>(total),
+                             s.direct == Port::On ? "left on VU1" : "on the sandbox", line.c_str());
             }
             if (!st.mismatched.empty())
             {
@@ -537,6 +677,7 @@ namespace sc3
                     followSwitch();
                     followHideFile();
                     followPortFile();
+                    followDirectFile();
                     report();
                     Vu1StreamAdapter::instance().frameEnd();
                 };
@@ -616,9 +757,17 @@ namespace sc3
         }
         else
             s.port = port && *port ? parsePort(port) : Port::On;
-        config.directs = s.mode == Mode::Sandbox;
+        if (const char *direct = std::getenv("SC3_NATIVE_VU1_DIRECT"); direct && *direct == '@')
+        {
+            s.directPath = direct + 1;
+            followDirectFile();
+        }
+        else
+            s.direct = direct && *direct ? parsePort(direct) : Port::Off;
+        const bool packets = s.direct != Port::On || !s.directPath.empty();
+        config.directs = s.mode == Mode::Sandbox && packets;
         const char *gsWrites = std::getenv("SC3_NATIVE_VU1_GSWRITES");
-        config.gsWrites = nativeGs && !(gsWrites && *gsWrites == '0');
+        config.gsWrites = nativeGs && (gsWrites && *gsWrites ? *gsWrites != '0' : packets);
         if (s.mode == Mode::Sandbox)
             config.active = [] { return g_state.sandbox; };
         const char *thread = std::getenv("SC3_NATIVE_VU1_THREAD");
@@ -630,7 +779,8 @@ namespace sc3
                   << (s.hidden.empty() && s.hidePath.empty() ? "" : ", some hidden")
                   << (s.only.empty() ? "" : ", only some on the sandbox")
                   << (s.port == Port::On ? ", C++ ports in the sandbox's place" : s.port == Port::Check ? ", C++ ports checked against the sandbox" : "")
-                  << (config.gsWrites ? ", drawn by the GS back end" : ", drawn by the native renderer")
+                  << (s.direct == Port::On ? ", drawn directly" : s.direct == Port::Check ? ", drawn from packets, checked against direct draws" : "")
+                  << (!packets ? "" : config.gsWrites ? ", packets drawn by the GS back end" : ", packets drawn by the native renderer")
                   << (s.onVif1Thread ? ", on the VIF1 thread" : ", on the game thread") << std::endl;
     }
 }
