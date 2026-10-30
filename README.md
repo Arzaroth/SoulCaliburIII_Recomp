@@ -31,7 +31,7 @@ Not an emulator: the game's own MIPS R5900 code, rebuilt as a native program on 
 ## Status
 
 **Playable from start to finish in automated tests, now in human testing.** The port runs on PS2Recomp's native
-target: the GS stream drawn with OpenGL, the VU1 microprograms on the native sandbox, the IOP modules recompiled, the IOP and the SPU2 on the wall clock, the frame loop and the movies on real time. Fights run at about
+target: the GS stream drawn with OpenGL, the VU1 and VU0 microprograms as C++, the IOP modules recompiled, the IOP and the SPU2 on the wall clock, the frame loop and the movies on real time. Fights run at about
 60 frames per second on a Ryzen 7 7800X3D, with music and voices. Every mode has been played through with scripted input: Tales
 of Souls to the credits, Chronicles of the Sword battles on the field map, World Competition, Soul Arena, Museum,
 Character Creation, Shop and Options, with saves loaded back after a restart. The game runs its own `rand`: the
@@ -54,6 +54,7 @@ Character Creation, Shop and Options, with saves loaded back after a restart. Th
 | Higher internal resolution (`PS2X_GS_SCALE`) | ✅ |
 | Frame loop on the native FramePacer | ✅ |
 | VU1 microprograms on the native sandbox, no emulated VU1 | ✅ |
+| VU1 and VU0 microprograms in C++, no VU emulation left | ✅ |
 | Widescreen | ⏳ |
 
 ✅ works · 🔧 in progress · ⏳ not reached yet
@@ -83,16 +84,21 @@ branch: `native/renderer` plus the SC3 fixes below, on their way into `native/re
   ends its frames in a vsync wait of CRI's ADXM, which the override turns into the same native frame end, so they
   play at their 29.97 pictures a second on the host's clock, with their sound in step. `PS2X_FRAME_CAP` sets the cap
   (60 by default, 0 = unlimited).
-- **VU1 microprograms on the native sandbox** by default: PS2Recomp's `Vu1StreamAdapter` runs every MSCAL of the
-  VIF1 stream on its own copy of the AOT-compiled programs, on the VIF1 thread, and hands their XGKICK packets to the
-  GS back end as native draws at their place in the GS stream; the emulated VU1 no longer draws anything
-  (`SC3_NATIVE_VU1=0` gives it back). Every mode checked against VU1 looks the same: menus, title, attract fights,
-  fights, Tales of Souls, Chronicles of the Sword (field map, battles, results), Character Creation and the movies.
-  The hottest program, the fighters' skinned bodies (program B at 0x1388, about 313 runs a fight frame), runs as C++
-  instead (`runtime/sc3_vu1_port.cpp`), bit for bit what the sandbox leaves: packets, VU memory, registers, flags
-  and cycles (`SC3_NATIVE_VU1_PORT=0` puts it back on the sandbox, `=check` runs both and compares).
-  Capped play holds 59.0-59.3 fps on the regression route; uncapped fights run about 56 fps (1.8 more than with
-  every program on the sandbox) against VU1's 59-62.
+- **VU1 microprograms in C++** by default: PS2Recomp's `Vu1StreamAdapter` reads every VIF1 stream and, at each
+  MSCAL, runs the program as C++ on its copy of VU1 memory, on the VIF1 thread, handing the XGKICK packets to the GS
+  back end as native draws at their place in the GS stream. SC3's two programs, A (stage, props, sky, floor,
+  reflection, weapons, shine) and B (fighters), are written as C++ by `scripts/vu1_port_gen.py` from the microcode
+  `ps2_vu_aot` compiled (`scripts/recomp.sh`, `generated/vu1port/`), with what VU1's pipeline makes timing-dependent
+  worked out for every path; the fighters' skinned bodies (B:0x1388) keep their hand-written port
+  (`runtime/sc3_vu1_port.cpp`). Every MSCAL leaves exactly what the sandbox (the AOT-compiled microcode on
+  PS2Recomp's VU1 interpreter) leaves: packets, VU memory, registers, flags and cycles.
+  `SC3_NATIVE_VU1_PORT=0` puts every program back on the sandbox, `=check` runs both and compares,
+  `SC3_NATIVE_VU1_PORT_SKIP=<A:0x10,...>` keeps some entries on it, `SC3_NATIVE_VU1=0` gives everything back to the
+  emulated VU1. The VU0 microprograms the EE calls with VCALLMS (the math library, about 370,000 calls a second in
+  fights) run as C++ written the same way, in the interpreter's place (`runtime/sc3_vu0.cpp`; `SC3_NATIVE_VU0=0` puts
+  them back, `=check` compares).
+  The regression route holds 60.0 fps capped; uncapped fights run about 61-62 fps, against 55.8 with everything on
+  the sandbox and VU0's interpreter.
 - **Speed**: the regression route runs at 59.6 fps (58.2 on the vblank grid), with 5 frames over 25 ms instead of
   about 590; uncapped (`PS2X_FRAME_CAP=0`) it reaches 90 GS frames per second, 112 game frames per second.
 
@@ -110,7 +116,7 @@ disc files ──► Ghidra (headless, EE) + ps2_analyzer + recomp/*_hints.txt �
                                            │
                                 ps2_recomp ──► C++ (one file per function)
                                            │
-             VU1/VU0 microcode in the ELF ──► ps2_vu_aot ──► C++ (generated/vu1/)
+             VU1/VU0 microcode in the ELF ──► ps2_vu_aot ──► C++ (generated/vu1/) ──► vu1_port_gen.py ──► C++ (generated/vu1port/)
                                            │
    PS2Recomp runtime: EE kernel HLE · DMAC · GIF/GS · VIF/VU0/VU1 ─┼─► ps2EntryRunner
    PS2Recomp IOP:     the game's own IRX, recompiled (generated/iop/) or interpreted · SPU2 · SIO2
@@ -119,15 +125,15 @@ disc files ──► Ghidra (headless, EE) + ps2_analyzer + recomp/*_hints.txt �
 - The ELF has no symbols. Ghidra maps the functions; `scripts/find_code_pointers.py` adds those reached only through
   pointers, jump tables or tail calls (the hint lists in `recomp/`).
 - PS2Recomp turns every function into C++. `ps2_vu_aot` finds the VU1 and VU0 microprograms in the ELF and compiles
-  them ahead of time; the VU1 programs run on PS2Recomp's native sandbox, on the VIF1 thread, and draw through the
-  GS back end.
+  them ahead of time; `scripts/vu1_port_gen.py` turns the two VU1 programs and the VU0 program into C++ without a
+  pipeline to run: VU1's runs on the VIF1 thread and draws through the GS back end, VU0's on the EE's VCALLMS.
 - The GS stream is translated into OpenGL draws by PS2Recomp's native GS back end, the CPU rasterizer stays as the
   validation reference.
 - `runtime/sc3_overrides.cpp` holds the game-specific bindings: reserved memory, a host Sofdec movie player and
   mixer, the renderer and timing choices, and diagnostic tracers.
 
 The runtime is the `PS2Recomp/` git submodule: [boubou666/PS2Recomp](https://github.com/boubou666/PS2Recomp), branch
-`sc3/native-vu1` (`native/renderer` plus SC3's fixes and the native VU1 sandbox), the fork shared with the *Twisted Metal: Black*, *Valkyrie Profile 2: Silmeria*, *The Lord of the Rings: The
+`sc3/native-vu1` (`native/renderer` plus SC3's fixes and the VU program hooks), the fork shared with the *Twisted Metal: Black*, *Valkyrie Profile 2: Silmeria*, *The Lord of the Rings: The
 Third Age* and *Drakengard* recompilations; the port builds on the same runtime as the others.
 The top-level `CMakeLists.txt` builds its runtime, swaps its placeholder function table for the generated one and
 links the generated code, `runtime/` and the compiled VU1 microcode into `ps2EntryRunner`. Every fix made for this
@@ -151,7 +157,7 @@ git clone --recurse-submodules https://github.com/Arzaroth/SoulCaliburIII_Recomp
 cd SoulCaliburIII_Recomp
 scripts/extract_iso.sh "/path/to/Soulcalibur III (USA).iso"   # disc files -> game/
 scripts/build_tools.sh                                         # ps2_recomp, ps2_analyzer, ps2_vu_aot -> build/tools
-scripts/recomp.sh                                              # SLUS_212.16 + recomp/sc3.toml -> generated/, VU microcode -> generated/vu1/
+scripts/recomp.sh                                              # SLUS_212.16 + recomp/sc3.toml -> generated/, VU microcode -> generated/vu1/, VU programs in C++ -> generated/vu1port/
 scripts/build_runtime.sh                                       # runtime + generated code -> build/game (RelWithDebInfo)
 scripts/iop_recomp.sh && scripts/build_runtime.sh             # the IRX modules as native code -> generated/iop/
 scripts/run.sh                                                 # ps2EntryRunner game/SLUS_212.16
@@ -201,8 +207,12 @@ player 2:
 | `PS2X_GS_SCALE=<n>` | Internal resolution multiplier of the native GS back end |
 | `PS2X_IOP_NATIVE=0` | Interpret the IRX modules instead of running their recompiled code |
 | `PS2X_IOP_WALLCLOCK=0` | Run the IOP on the EE cycles the game accounts instead of the host's clock |
-| `SC3_NATIVE_VU1=0` | Run the VU1 microprograms on the emulated VU1 instead of the native sandbox |
-| `SC3_NATIVE_VU1_PORT=0\|check` | Run the fighters' skinned bodies (B:0x1388) on the sandbox instead of in C++, or both, compared |
+| `SC3_NATIVE_VU1=0` | Run the VU1 microprograms on the emulated VU1 instead of in C++ |
+| `SC3_NATIVE_VU1_PORT=0\|check` | Run the VU1 programs on the native sandbox (the AOT microcode on PS2Recomp's interpreter) instead of in C++, or both, compared |
+| `SC3_NATIVE_VU1_PORT_SKIP=<A:0x10,…>` | Keep those entries on the sandbox |
+| `SC3_NATIVE_VU0=0\|check` | Run the VU0 microprograms on PS2Recomp's interpreter instead of in C++, or both, compared (`SC3_NATIVE_VU0_LOG`, `SC3_NATIVE_VU0_RECORD` as for VU1) |
+| `SC3_NATIVE_VU1_LOG=1` | Every 5 s, MSCALs by entry; a line lists any left on the sandbox |
+| `SC3_NATIVE_VU1_RECORD=<file>` | Record sampled sandbox runs per entry (and, with `=check`, runs whose port differs) for `sc3_tests` (`SC3_VU1_TRACE`) |
 | `PS2X_VIF1_THREAD=0` | Run VIF1 and the VU1 microcode on the game thread (default: their own thread, about a third faster in fights) |
 | `PS2X_EE_CATCHUP=0\|field\|1` | Wall-clock catch-up: SC3 defaults to off, so emulated time never runs faster than real time |
 | `PS2X_SC3_NO_MOVIES=1` | Skip the one-shot movies (for tests) |
@@ -235,10 +245,11 @@ player 2:
 | `PS2Recomp/` | The recompiler and runtime (git submodule, boubou666/PS2Recomp branch `sc3/native-vu1`) |
 | `CMakeLists.txt` | Builds the runtime with the generated code and the game overrides linked in |
 | `recomp/` | Recompiler config (`sc3.toml`), the Ghidra function map and the entry-point hint lists |
-| `runtime/` | Game override module (`sc3_overrides.cpp`) |
-| `scripts/` | Build, recompile and run scripts; disassembly, IRX and profiling helpers |
+| `runtime/` | Game override module (`sc3_overrides.cpp`), the native VU1 hooks (`sc3_native.cpp`), the VU1 program ports' operations and entry table (`sc3_vu1_ops.h`, `sc3_vu1_programs.cpp`), the VU0 hook (`sc3_vu0.cpp`), B:0x1388 by hand (`sc3_vu1_port.cpp`) |
+| `scripts/` | Build, recompile and run scripts; the VU1 program generator (`vu1_port_gen.py`); disassembly, IRX and profiling helpers |
 | `patches/` | Experiments kept for reference |
 | `docs/screenshots/` | Pictures of the running port |
+| `tests/` | `sc3_tests` (`SC3_BUILD_TESTS=ON`): the VU1 and VU0 ports against the interpreter and recorded runs |
 | `RECOMP_NOTES.md` | How the port was brought up, the fixes and the debugging tools |
 | `game/`, `generated/`, `build/` | Created by the scripts, ignored by git: disc files, generated C++, builds |
 

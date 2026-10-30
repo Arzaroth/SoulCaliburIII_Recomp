@@ -386,9 +386,12 @@ void register_sc3_vu1_port_tests()
     });
 }
 
+void register_sc3_vu1_programs_tests();
+
 int main()
 {
     register_sc3_vu1_port_tests();
+    register_sc3_vu1_programs_tests();
     const int result = MiniTest::Run();
     std::cout.flush();
     std::_Exit(result);
