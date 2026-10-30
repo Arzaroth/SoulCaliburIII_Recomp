@@ -15,4 +15,9 @@ namespace sc3
     // Status must already hold ZS and SS (skinnedBodyReady): their sticky updates are not computed.
     uint64_t runSkinnedBody(VU1State &state, uint8_t *data, uint32_t top, uint32_t itop, Vu1Kick kick, void *user, bool fast = true);
     bool skinnedBodyReady(const VU1State &state);
+
+    // SC3's VU1 programs, A (0) and B (1). A start pc whose setup jumps on (JR vi1) to a routine whose address the
+    // stream left in VU memory: that routine's pc, else 0.
+    constexpr uint32_t kProgramA = 0u, kProgramB = 1u;
+    uint32_t vu1DispatchTarget(uint32_t program, uint32_t pc, const uint8_t *data, uint32_t top);
 }
