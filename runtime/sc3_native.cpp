@@ -763,7 +763,7 @@ namespace sc3
             followDirectFile();
         }
         else
-            s.direct = direct && *direct ? parsePort(direct) : Port::Off;
+            s.direct = direct && *direct ? parsePort(direct) : s.port == Port::On ? Port::On : Port::Off;
         const bool packets = s.direct != Port::On || !s.directPath.empty();
         config.directs = s.mode == Mode::Sandbox && packets;
         const char *gsWrites = std::getenv("SC3_NATIVE_VU1_GSWRITES");
