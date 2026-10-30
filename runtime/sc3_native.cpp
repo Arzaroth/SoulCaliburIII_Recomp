@@ -1,6 +1,7 @@
 #include "sc3_native.h"
 
 #include "ps2_runtime.h"
+#include "runtime/native/native_vif1.h"
 #include "runtime/native/native_vu1_stream.h"
 #include "runtime/ps2_vu1.h"
 
@@ -78,6 +79,7 @@ namespace sc3
             ProgramSet hidden, only;
             std::string hidePath, hideSpec;
             bool log = false;
+            bool onVif1Thread = false;
             Stats stats;
             std::chrono::steady_clock::time_point since = std::chrono::steady_clock::now();
         };
@@ -234,10 +236,17 @@ namespace sc3
         {
             if (getRegU32(ctx, 31) == kFrameEndReturn)
             {
-                followSwitch();
-                followHideFile();
-                report();
-                Vu1StreamAdapter::instance().frameEnd();
+                auto frameEnd = []
+                {
+                    followSwitch();
+                    followHideFile();
+                    report();
+                    Vu1StreamAdapter::instance().frameEnd();
+                };
+                if (g_state.onVif1Thread)
+                    ps2x::native::runOnVif1Thread(frameEnd);
+                else
+                    frameEnd();
             }
             g_state.elapsedLines(rdram, ctx, runtime);
         }
@@ -299,11 +308,15 @@ namespace sc3
         config.gsWrites = nativeGs && !(gsWrites && *gsWrites == '0');
         if (s.mode == Mode::Sandbox)
             config.active = [] { return g_state.sandbox; };
+        const char *thread = std::getenv("SC3_NATIVE_VU1_THREAD");
+        s.onVif1Thread = runtime.memory().vif1Threaded() && !(thread && *thread == '0');
+        config.onVif1Thread = s.onVif1Thread;
         Vu1StreamAdapter::instance().install(config);
         std::cerr << "[sc3] native VU1: "
                   << (s.mode == Mode::Sandbox ? "every program on the sandbox" : "observed, every program on VU1")
                   << (s.hidden.empty() && s.hidePath.empty() ? "" : ", some hidden")
                   << (s.only.empty() ? "" : ", only some on the sandbox")
-                  << (config.gsWrites ? ", drawn by the GS back end" : ", drawn by the native renderer") << std::endl;
+                  << (config.gsWrites ? ", drawn by the GS back end" : ", drawn by the native renderer")
+                  << (s.onVif1Thread ? ", on the VIF1 thread" : ", on the game thread") << std::endl;
     }
 }
