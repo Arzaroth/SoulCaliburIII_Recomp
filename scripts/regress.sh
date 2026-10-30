@@ -33,6 +33,10 @@
 #                     the run with B:0x1388 on the sandbox (SC3_NATIVE_VU1_PORT=@file); in the pause menu
 #                     pause_sandbox.png a little after pause.png (pause_port_floor_psnr), then the C++ port switched on
 #                     for pause_port.png (pause_port_psnr, against pause.png)
+#   REGRESS_NATIVE_VU1_DIRECT_AB=1
+#                     the run with the programs drawn from their packets (SC3_NATIVE_VU1_DIRECT=@file); in the pause
+#                     menu pause_packets.png a little after pause.png (pause_direct_floor_psnr), then direct draws
+#                     switched on for pause_direct.png (pause_direct_psnr, against pause.png)
 #   REGRESS_PAUSE_HIDE="A:0x10 B:0x1388 ..."
 #                     in the pause menu, one still per entry with that VU1 program hidden (SC3_NATIVE_VU1_HIDE), as
 #                     pause_hide_<entry>.png, and pause_hide.txt: each one's imgdiff against pause.png
@@ -86,6 +90,12 @@ if [ "${REGRESS_NATIVE_VU1_PORT_AB:-0}" = 1 ]; then
     port_switch=$out/native_vu1_port.switch
     echo 0 > "$port_switch"
     export SC3_NATIVE_VU1_PORT="@$port_switch"
+fi
+direct_switch=
+if [ "${REGRESS_NATIVE_VU1_DIRECT_AB:-0}" = 1 ]; then
+    direct_switch=$out/native_vu1_direct.switch
+    echo 0 > "$direct_switch"
+    export SC3_NATIVE_VU1_DIRECT="@$direct_switch"
 fi
 cap_file=
 if [ -n "${REGRESS_FIGHT_FRAME_CAP:-}" ]; then
@@ -205,6 +215,13 @@ route()
         await "$pause_secs" || return 1
         pause_still pause_port.png
     fi
+    if [ -n "$direct_switch" ]; then
+        await "$pause_secs" || return 1
+        pause_still pause_packets.png
+        echo 1 > "$direct_switch"
+        await "$pause_secs" || return 1
+        pause_still pause_direct.png
+    fi
     if [ -n "$hide_file" ]; then
         local entry
         for entry in $REGRESS_PAUSE_HIDE; do
@@ -285,6 +302,8 @@ pause_floor_psnr=$(pause_psnr pause_vu1.png)
 pause_native_psnr=$(pause_psnr pause_native.png)
 pause_port_floor_psnr=$(pause_psnr pause_sandbox.png)
 pause_port_psnr=$(pause_psnr pause_port.png)
+pause_direct_floor_psnr=$(pause_psnr pause_packets.png)
+pause_direct_psnr=$(pause_psnr pause_direct.png)
 if [ -n "$hide_file" ]; then
     for entry in $REGRESS_PAUSE_HIDE; do
         still=pause_hide_$(echo "$entry" | tr ':*' '__').png
@@ -315,6 +334,8 @@ pause_floor_psnr=$pause_floor_psnr
 pause_native_psnr=$pause_native_psnr
 pause_port_floor_psnr=$pause_port_floor_psnr
 pause_port_psnr=$pause_port_psnr
+pause_direct_floor_psnr=$pause_direct_floor_psnr
+pause_direct_psnr=$pause_direct_psnr
 EOF
 cat > "$out/details.txt" <<EOF
 fight_at_s=$fight_at_s
