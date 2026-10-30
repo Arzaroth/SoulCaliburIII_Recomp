@@ -474,8 +474,8 @@ namespace sc3
             s.portPath = port + 1;
             followPortFile();
         }
-        else if (port)
-            s.port = parsePort(port);
+        else
+            s.port = port && *port ? parsePort(port) : Port::On;
         config.directs = s.mode == Mode::Sandbox;
         const char *gsWrites = std::getenv("SC3_NATIVE_VU1_GSWRITES");
         config.gsWrites = nativeGs && !(gsWrites && *gsWrites == '0');
