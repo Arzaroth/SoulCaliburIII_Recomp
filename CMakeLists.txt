@@ -34,6 +34,18 @@ if(SC3_VU1_SOURCES)
     target_sources(ps2EntryRunner PRIVATE $<TARGET_OBJECTS:sc3_vu1_aot>)
 endif()
 
+# SC3's VU1 programs as C++ (scripts/vu1_port_gen.py, run by scripts/recomp.sh).
+file(GLOB SC3_VU1_PORT_SOURCES CONFIGURE_DEPENDS "${SC3_GENERATED_DIR}/vu1port/*.cpp")
+if(NOT SC3_VU1_PORT_SOURCES)
+    message(FATAL_ERROR "No VU1 program ports in ${SC3_GENERATED_DIR}/vu1port. Run scripts/recomp.sh first.")
+endif()
+add_library(sc3_vu1_port OBJECT ${SC3_VU1_PORT_SOURCES})
+target_link_libraries(sc3_vu1_port PRIVATE ps2_runtime)
+target_include_directories(sc3_vu1_port PRIVATE runtime)
+set_target_properties(sc3_vu1_port PROPERTIES UNITY_BUILD OFF)
+target_compile_options(sc3_vu1_port PRIVATE -O2)
+target_sources(ps2EntryRunner PRIVATE $<TARGET_OBJECTS:sc3_vu1_port>)
+
 # The game's IRX modules recompiled by PS2Recomp's tools/iop_recomp.py (scripts/iop_recomp.sh), run with PS2X_IOP_NATIVE=1.
 file(GLOB SC3_IOP_SOURCES CONFIGURE_DEPENDS "${SC3_GENERATED_DIR}/iop/*.cpp")
 if(SC3_IOP_SOURCES)
@@ -51,7 +63,10 @@ option(SC3_BUILD_TESTS "Build sc3_tests: the C++ VU1 program ports against the i
 if(SC3_BUILD_TESTS)
     add_executable(sc3_tests
         tests/sc3_vu1_port_tests.cpp
+        tests/sc3_vu1_programs_tests.cpp
         runtime/sc3_vu1_port.cpp
+        runtime/sc3_vu1_programs.cpp
+        $<TARGET_OBJECTS:sc3_vu1_port>
         PS2Recomp/ps2xTest/src/test_function_table.cpp)
     target_include_directories(sc3_tests PRIVATE runtime PS2Recomp/ps2xTest/include PS2Recomp/ps2xRuntime/include)
     target_link_libraries(sc3_tests PRIVATE ps2_runtime)

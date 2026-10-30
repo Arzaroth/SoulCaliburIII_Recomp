@@ -16,8 +16,11 @@ namespace sc3
     uint64_t runSkinnedBody(VU1State &state, uint8_t *data, uint32_t top, uint32_t itop, Vu1Kick kick, void *user, bool fast = true);
     bool skinnedBodyReady(const VU1State &state);
 
-    // SC3's VU1 programs, A (0) and B (1). A start pc whose setup jumps on (JR vi1) to a routine whose address the
-    // stream left in VU memory: that routine's pc, else 0.
+    // SC3's VU1 programs, A (0) and B (1), from a start pc as VU1Interpreter runs them (registers, flags, memory,
+    // packets, cycles). A start pc whose setup jumps on (JR) is ported for the targets the port knows.
     constexpr uint32_t kProgramA = 0u, kProgramB = 1u;
     uint32_t vu1DispatchTarget(uint32_t program, uint32_t pc, const uint8_t *data, uint32_t top);
+    bool vu1Ported(uint32_t program, uint32_t pc, const uint8_t *data, uint32_t top);
+    uint64_t runVu1Program(uint32_t program, uint32_t pc, VU1State &state, uint8_t *data, uint32_t top, uint32_t itop, Vu1Kick kick,
+                           void *user);
 }
