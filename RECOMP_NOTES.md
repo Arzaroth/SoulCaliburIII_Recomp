@@ -60,10 +60,19 @@ sets up the following.
   `=0` keeps the stretched IOP-clock output). The IOP mixes into a queue the audio callback takes from, so SC3's ADX
   stream (CRI ADXI, AutoDMA on core 1, one 256-sample half ahead) gets each half's interrupt before the next half
   plays: regress route 17367 AutoDMA transfers (17353 on the IOP clock), 23 empty halves (24869 before the queue),
-  58.24 fps. `PS2X_IOP_WALLCLOCK=1` is not the default: it costs about 5 fps in the regress route (53 against 58)
-  with or without the SPU2 on the wall clock. The SPU2 stays within 512 samples of the IOP clock (PS2Recomp e749e57):
+  58.24 fps. The SPU2 stays within 512 samples of the IOP clock (PS2Recomp e749e57):
   regress route 17355 transfers, 24 empty halves, 58.24 fps, 6918 frames of silence (`gap=`, mostly while loading)
   in 189 s. SC3's movie soundtracks are host audio mixed into the output; the game never streams PCM on core 0.
+- **IOP on the wall clock by default** (`PS2X_IOP_WALLCLOCK=1`, set by the override unless already set; `=0` puts the
+  IOP back on the EE cycles the game accounts). Its timers, vblank interrupts and the sound drivers' ticks follow real
+  time. It used to cost 4 to 7 fps: the runtime read the host clock at every `EeScheduler::accountCycles`, and
+  `clock_gettime`, the duration conversion and `advanceIopEeCycles` took about a quarter of the EE thread in an
+  uncapped fight (PS2X_PROFILE: 3150 of 11395 samples). It now reads it once per `kIopWakeEeCycles` (0.16 ms) of EE
+  time (PS2Recomp sc3/native-hostclock-iop). Regress route, three runs a side, wall clock against EE clock: 59.79 fps
+  against 59.31 capped, 58.62 against 57.81 with the fight uncapped, 6 and 13 frames over 25 ms against 10 and 9,
+  0 to 69 empty ADX halves against 0 to 13 (before the fix: 55.87 against 59.79, 51.00 against 57.94, 18 and 57
+  frames over 25 ms). Saves were made in Options (create, overwrite) and loaded back after a restart, the setting
+  they hold restored at boot and by Load Data.
 - **Frame loop on real time** (`SC3_NATIVE_FRAMES`, on unless `=0`; PS2Recomp docs/native.md, layer 1). The main loop
   (0x12DB20) ends each frame with an inline Timer 3 wait: 0x148098 (lines since the last frame) polled from 0x12EA08
   until it reaches the target at sp+0x30, then called once more from 0x12EA88 to record the frame's length. The
@@ -72,9 +81,18 @@ sets up the following.
   (`presentGuestFrame`). SC3 counts frames, so there is no time step to feed. EE time follows real time over the
   run: a frame that accounts more than it took leaves a lead the next frames use up (otherwise the IOP runs ahead and
   the SPU2 drops 44800 samples in the regress route), and a load's long frame is charged in full up to a second
-  (the pacer's step stops at 0.1 s, and the ADX stream starved). A one-shot movie plays in a loop of its own that
-  ends no main-loop frame, so the vblanks pace the game while one plays; looping menu and loading backgrounds do
-  not. Two PS2Recomp fixes came with it: under native frames an idle wait lasts the EE cycles to its event, not the
+  (the pacer's step stops at 0.1 s, and the ADX stream starved). While a one-shot movie plays (the intro, the
+  opening, the Chronicles of the Sword story), the main loop takes another branch (0x12E638) and ends its frame in
+  mwPly's vsync wait 0x3AE238: ADXM's 0x3F0F38 sleeps the main thread in 0x3F0F10 until ADXM's vsync thread, woken
+  by the vblank interrupt, wakes it. The override answers that sleep (0x3F0F10 returning to 0x3F0F60 for 0x12E654)
+  with the same native frame end, so movies are paced by the host as well and nothing runs on the vblank grid. Their
+  pictures come from the movie clock (the soundtrack the audio callback took) at each window present: 29.97
+  pictures and 60 presents a second, the movie clock 1.000 s per second, the intro 35.12 s against its 35.07 s,
+  the opening 243.74 s against 243.68, the Chronicles movie 61.38 s against 61.23, a 330 s run's SPU2 output 330.3 s
+  long; the main loop holds 60 frames per second through all of them and Start still skips. Without the override the
+  main loop slept until emulated vblanks that no frame end kept on real time: EE time ran at 14% of real time and
+  stood 1.8 s ahead when the movie ended (PS2Recomp's idle present, native/renderer ea929440, does not help: the
+  movie pictures do not come from the GS). Two PS2Recomp fixes came with it: under native frames an idle wait lasts the EE cycles to its event, not the
   vblank timeline's lead (0.6 s stalls in the title-screen loads, sc3/native-frames-idle), and `PS2X_CAPTURE_DIR`
   saves the frame's own width (movie frames came out 1280x448, sc3/native-movie-scale). Regress route against the
   vblank grid: 59.56 fps against 58.22, game frames 59.65 per second (slowest 5 s 57.6) against 56.67 (46.3 in the
@@ -304,7 +322,8 @@ packet.
   interrupt handler 0x10E658.
 - `PS2X_SC3_TRACE_ADXT`, `PS2X_SC3_TRACE_ADXF`: ADX player status changes, AFS partition loading.
 - `PS2X_SC3_TRACE_TASKS`, `PS2X_SC3_TRACE_MOVIE`, `PS2X_SC3_TRACE_FADE`: task creation with names (0x128B30),
-  movie task and job states, the fade driver (0x1A2960).
+  movie task and job states and, every 5 s of a full-screen movie, its pictures and the window's presents per second
+  against the movie clock, the fade driver (0x1A2960).
 - Experiments kept behind variables: `PS2X_SC3_FORCE_TEXT` (start texture-font fades that never started),
   `PS2X_SC3_ADX_PLAYEND` (report PLAYEND for ADX players stuck in DECINFO). Neither is needed today.
 
