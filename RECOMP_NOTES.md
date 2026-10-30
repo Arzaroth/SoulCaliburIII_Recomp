@@ -306,7 +306,7 @@ thread, and its packets go to the GS thread. On the sandbox the VIF1 thread also
 1050). The next step for B:0x1388 is batches straight from the port, without building and reading back its GIF
 packet.
 
-#### Programs A and B in C++ (`scripts/vu1_port_gen.py`, `generated/vu1port/`)
+#### Programs A and B in C++ (PS2Recomp `tools/vu1_lift.py`, `generated/vu1port/`)
 
 Every MSCAL of A and B runs as C++ by default: A's 20 start pcs (the setups at 0x10, 0x1c80 and 0x2098, which load
 the constants and JR to a routine whose address the stream left in VU memory, and the 17 routines) and B's 18 (setups
@@ -314,8 +314,11 @@ at 0x10, 0x1990, 0x21e0 and 15 routines). B:0x1388 called directly keeps its han
 status holds sticky Z and S. `SC3_NATIVE_VU1_LOG` names entries with their JR target (`A:0x10>0x2b0`) and prints a
 line of MSCALs left on the sandbox whenever there are any: over everything checked below, none.
 
-`scripts/vu1_port_gen.py` writes the C++ from the microcode `ps2_vu_aot` compiled; `scripts/recomp.sh` runs it, so,
-like `generated/`, nothing derived from the game is in the repository.
+PS2Recomp's `tools/vu1_lift.py` (first written here as `scripts/vu1_port_gen.py`, now shared with the other ports;
+PS2Recomp `native/vu1-lift`) writes the C++ from the microcode `ps2_vu_aot` compiled, for the programs, start pcs and
+JR targets `recomp/vu1_lift_spec.json` lists, on its operations header `runtime/ps2_vu1_lifted_ops.h` (namespace
+`ps2x::vu1lift`); `scripts/recomp.sh` runs it, so, like `generated/`, nothing derived from the game is in the
+repository. The move left the C++ the same byte for byte but for the header and namespace.
 
 - Each instruction becomes the operation it does on the VU registers, held in locals, with the interpreter's float
   rules (operands normalized, the PS2 addition, round toward zero, MAX/MINI on raw bits, FTOI, CLIP). A result or an
@@ -385,7 +388,7 @@ VU0 runs SC3's math library as microcode (`VCALLMS` from about 15 EE functions):
 `ps2_vu_aot` found at ELF offset 0x367a90 (VU0 code memory hash 5e40f831...), called from 0x0, 0x38, 0x60, 0xf0,
 0x360, 0x3c8 and 0x3e8, about 370,000 times a second in a fight. `PS2Runtime::setVu0MicroHook` (PS2Recomp
 `sc3/native-vu1-all`) hands each call to `runtime/sc3_vu0.cpp`, which runs the program as C++ written by
-`vu1_port_gen.py` the same way as VU1's (VU0's 4 KB memories and branch range, plus ITOF, MR32, SQRT, RSQRT, WAITQ,
+`vu1_lift.py` the same way as VU1's (VU0's 4 KB memories and branch range, plus ITOF, MR32, SQRT, RSQRT, WAITQ,
 FCGET), from the state VU0 starts at (reset, the registers and flags copied from the EE context).
 `SC3_NATIVE_VU0=0` gives every call back to the interpreter, `=check` runs both and compares; `SC3_NATIVE_VU0_LOG`
 and `SC3_NATIVE_VU0_RECORD` log and record as for VU1.

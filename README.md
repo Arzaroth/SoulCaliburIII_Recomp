@@ -87,7 +87,7 @@ branch: `native/renderer` plus the SC3 fixes below, on their way into `native/re
 - **VU1 microprograms in C++** by default: PS2Recomp's `Vu1StreamAdapter` reads every VIF1 stream and, at each
   MSCAL, runs the program as C++ on its copy of VU1 memory, on the VIF1 thread, handing the XGKICK packets to the GS
   back end as native draws at their place in the GS stream. SC3's two programs, A (stage, props, sky, floor,
-  reflection, weapons, shine) and B (fighters), are written as C++ by `scripts/vu1_port_gen.py` from the microcode
+  reflection, weapons, shine) and B (fighters), are written as C++ by PS2Recomp's `tools/vu1_lift.py` from the microcode
   `ps2_vu_aot` compiled (`scripts/recomp.sh`, `generated/vu1port/`), with what VU1's pipeline makes timing-dependent
   worked out for every path; the fighters' skinned bodies (B:0x1388) keep their hand-written port
   (`runtime/sc3_vu1_port.cpp`). Every MSCAL leaves exactly what the sandbox (the AOT-compiled microcode on
@@ -116,7 +116,7 @@ disc files ──► Ghidra (headless, EE) + ps2_analyzer + recomp/*_hints.txt �
                                            │
                                 ps2_recomp ──► C++ (one file per function)
                                            │
-             VU1/VU0 microcode in the ELF ──► ps2_vu_aot ──► C++ (generated/vu1/) ──► vu1_port_gen.py ──► C++ (generated/vu1port/)
+             VU1/VU0 microcode in the ELF ──► ps2_vu_aot ──► C++ (generated/vu1/) ──► vu1_lift.py ──► C++ (generated/vu1port/)
                                            │
    PS2Recomp runtime: EE kernel HLE · DMAC · GIF/GS · VIF/VU0/VU1 ─┼─► ps2EntryRunner
    PS2Recomp IOP:     the game's own IRX, recompiled (generated/iop/) or interpreted · SPU2 · SIO2
@@ -125,7 +125,8 @@ disc files ──► Ghidra (headless, EE) + ps2_analyzer + recomp/*_hints.txt �
 - The ELF has no symbols. Ghidra maps the functions; `scripts/find_code_pointers.py` adds those reached only through
   pointers, jump tables or tail calls (the hint lists in `recomp/`).
 - PS2Recomp turns every function into C++. `ps2_vu_aot` finds the VU1 and VU0 microprograms in the ELF and compiles
-  them ahead of time; `scripts/vu1_port_gen.py` turns the two VU1 programs and the VU0 program into C++ without a
+  them ahead of time; PS2Recomp's `tools/vu1_lift.py` (the programs listed in `recomp/vu1_lift_spec.json`) turns the
+  two VU1 programs and the VU0 program into C++ without a
   pipeline to run: VU1's runs on the VIF1 thread and draws through the GS back end, VU0's on the EE's VCALLMS.
 - The GS stream is translated into OpenGL draws by PS2Recomp's native GS back end, the CPU rasterizer stays as the
   validation reference.
@@ -244,9 +245,9 @@ player 2:
 |---|---|
 | `PS2Recomp/` | The recompiler and runtime (git submodule, boubou666/PS2Recomp branch `sc3/native-vu1`) |
 | `CMakeLists.txt` | Builds the runtime with the generated code and the game overrides linked in |
-| `recomp/` | Recompiler config (`sc3.toml`), the Ghidra function map and the entry-point hint lists |
-| `runtime/` | Game override module (`sc3_overrides.cpp`), the native VU1 hooks (`sc3_native.cpp`), the VU1 program ports' operations and entry table (`sc3_vu1_ops.h`, `sc3_vu1_programs.cpp`), the VU0 hook (`sc3_vu0.cpp`), B:0x1388 by hand (`sc3_vu1_port.cpp`) |
-| `scripts/` | Build, recompile and run scripts; the VU1 program generator (`vu1_port_gen.py`); disassembly, IRX and profiling helpers |
+| `recomp/` | Recompiler config (`sc3.toml`), the VU programs to lift (`vu1_lift_spec.json`), the Ghidra function map and the entry-point hint lists |
+| `runtime/` | Game override module (`sc3_overrides.cpp`), the native VU1 hooks (`sc3_native.cpp`), the VU1 program ports' entry table (`sc3_vu1_programs.cpp`), the VU0 hook (`sc3_vu0.cpp`), B:0x1388 by hand (`sc3_vu1_port.cpp`) |
+| `scripts/` | Build, recompile and run scripts; disassembly, IRX and profiling helpers |
 | `patches/` | Experiments kept for reference |
 | `docs/screenshots/` | Pictures of the running port |
 | `tests/` | `sc3_tests` (`SC3_BUILD_TESTS=ON`): the VU1 and VU0 ports against the interpreter and recorded runs |
