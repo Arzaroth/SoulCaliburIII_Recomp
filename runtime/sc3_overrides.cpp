@@ -112,6 +112,7 @@ namespace
             if (!m_active || !m_fullScreen)
                 return false;
             advanceLocked();
+            tracePresentLocked();
             if (m_current.empty())
             {
                 rgba.assign(640u * 448u * 4u, 0u);
@@ -183,6 +184,34 @@ namespace
             }
             if (popped)
                 m_wake.notify_all();
+        }
+
+        // PS2X_SC3_TRACE_MOVIE: every 5 s of a full-screen movie, the pictures it showed and the window's presents per
+        // second against the movie clock.
+        void tracePresentLocked()
+        {
+            static const bool trace = std::getenv("PS2X_SC3_TRACE_MOVIE") != nullptr;
+            if (!trace)
+                return;
+            using Clock = std::chrono::steady_clock;
+            const Clock::time_point now = Clock::now();
+            if (m_traceStart == Clock::time_point{})
+            {
+                m_traceStart = now;
+                m_traceNumber = m_number;
+                m_traceClock = m_clock;
+            }
+            ++m_tracePresents;
+            const double seconds = std::chrono::duration<double>(now - m_traceStart).count();
+            if (seconds < 5.0)
+                return;
+            std::cerr << "[sc3] movie pictures " << (m_number - m_traceNumber) / seconds << "/s, presents " << m_tracePresents / seconds
+                      << "/s, movie clock " << static_cast<double>(m_clock - m_traceClock) / kRate / seconds << " s/s, at "
+                      << static_cast<double>(m_clock) / kRate << " s" << std::endl;
+            m_traceStart = now;
+            m_traceNumber = m_number;
+            m_traceClock = m_clock;
+            m_tracePresents = 0;
         }
 
         void updateEndLocked()
@@ -387,6 +416,10 @@ namespace
         uint32_t m_height = 0;
         uint32_t m_number = 0;
         uint32_t m_written = ~0u;
+        std::chrono::steady_clock::time_point m_traceStart{};
+        uint32_t m_traceNumber = 0;
+        uint64_t m_traceClock = 0;
+        uint32_t m_tracePresents = 0;
         bool m_loop = false;
         bool m_fullScreen = false;
         bool m_decoderDone = false;
