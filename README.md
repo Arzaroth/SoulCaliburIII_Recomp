@@ -55,6 +55,7 @@ Character Creation, Shop and Options, with saves loaded back after a restart. Th
 | Frame loop on the native FramePacer | ✅ |
 | VU1 microprograms on the native sandbox, no emulated VU1 | ✅ |
 | VU1 and VU0 microprograms in C++, no VU emulation left | ✅ |
+| VU1 programs drawn from their computation: no GIF packets, no GS register replay | ✅ |
 | Widescreen | ⏳ |
 
 ✅ works · 🔧 in progress · ⏳ not reached yet
@@ -65,7 +66,7 @@ The port runs on the native target the other PS2Recomp ports use. It pins PS2Rec
 branch: `native/renderer` plus the SC3 fixes below, on their way into `native/renderer`.
 
 - **Native GS renderer**: PS2Recomp's GS back end translates the GS stream into OpenGL draws (`GSNativeBackend`),
-  with no GS emulation. SC3 needed these
+  on its own model of GS memory (see the emulation left, below). SC3 needed these
   fixes in it: pixels sampled at their integer coordinates as the GS does (a one-pixel seam every 64 pixels and a
   soft picture before), HIGHLIGHT and HIGHLIGHT2 adding the vertex alpha at its own scale, blending with Ad at the
   GS's scale, draws testing against the Z buffer their ZBUF names (the shadow pass darkened the whole frame), and
@@ -85,8 +86,11 @@ branch: `native/renderer` plus the SC3 fixes below, on their way into `native/re
   play at their 29.97 pictures a second on the host's clock, with their sound in step. `PS2X_FRAME_CAP` sets the cap
   (60 by default, 0 = unlimited).
 - **VU1 microprograms in C++** by default: PS2Recomp's `Vu1StreamAdapter` reads every VIF1 stream and, at each
-  MSCAL, runs the program as C++ on its copy of VU1 memory, on the VIF1 thread, handing the XGKICK packets to the GS
-  back end as native draws at their place in the GS stream. SC3's two programs, A (stage, props, sky, floor,
+  MSCAL, runs the program as C++ on its copy of VU1 memory, on the VIF1 thread. The programs draw from what they
+  compute: no GIF packet is written, each vertex goes to `runtime/sc3_draw_sink.cpp` as it is computed, the drawing
+  registers come from the game's own material blocks in its VIF data, decoded in C++, and the triangles go to the GL
+  back end at their place in the GS stream (`Renderer::drawGs`); `SC3_NATIVE_VU1_DIRECT=0` goes back to the packets.
+  SC3's two programs, A (stage, props, sky, floor,
   reflection, weapons, shine) and B (fighters), are written as C++ by PS2Recomp's `tools/vu1_lift.py` from the microcode
   `ps2_vu_aot` compiled (`scripts/recomp.sh`, `generated/vu1port/`), with what VU1's pipeline makes timing-dependent
   worked out for every path; the fighters' skinned bodies (B:0x1388) keep their hand-written port
@@ -97,10 +101,25 @@ branch: `native/renderer` plus the SC3 fixes below, on their way into `native/re
   emulated VU1. The VU0 microprograms the EE calls with VCALLMS (the math library, about 370,000 calls a second in
   fights) run as C++ written the same way, in the interpreter's place (`runtime/sc3_vu0.cpp`; `SC3_NATIVE_VU0=0` puts
   them back, `=check` compares).
-  The regression route holds 60.0 fps capped; uncapped fights run about 61-62 fps, against 55.8 with everything on
+  The regression route holds 60.0 fps capped; uncapped fights run about 62.5 fps drawing directly (61 from the packets), against 55.8 with everything on
   the sandbox and VU0's interpreter.
 - **Speed**: the regression route runs at 59.6 fps (58.2 on the vblank grid), with 5 frames over 25 ms instead of
   about 590; uncapped (`PS2X_FRAME_CAP=0`) it reaches 90 GS frames per second, 112 game frames per second.
+
+### Emulation left
+
+What still models the PS2 rather than doing the job natively, in the order the ports work through it:
+
+| | Where SC3 stands | What remains |
+|---|:---:|---|
+| 1. VU1 programs | 🔧 | Every program runs as C++ (`tools/vu1_lift.py`), still with the microcode's own semantics (VU registers, flags, cycles, VU memory) on the VIF stream's VU memory. Their 3D is drawn natively: triangles from the computation, the material from the game's A+D blocks decoded in C++ (the game keeps its materials only as GS register words), no GIF packet, GS front end or register replay. The render target and the global registers (FRAME, ZBUF, offset, scissor, TEXA, FOGCOL, dithering) are still the GS state where the draw sits in the stream. |
+| 2. GS front end and the native back end's GS model | ⏳ | The GL back end keeps GS memory, its swizzled layouts, CLUT loads, the texture buffer model, page coherence between targets and memory, and shows the frame by reading DISPFB. Everything SC3 sends besides the VU1 3D goes through the GS front end's state machine: 2D, menus, HUD, the frame copies and post passes, the shadow volumes. |
+| 3. VIF and DMA | ⏳ | VIF1 still unpacks the game's packets into VU memory and the DMA chains are walked as the DMAC would; the programs read their input from there, not from the game's data directly. |
+| 4. VU0 | 🔧 | The microprograms (VCALLMS) run as C++ lifted the same way (microcode semantics); the VU0 macro-mode instructions in the EE code are recompiled one by one. |
+| 5. Sound | ⏳ | The SPU2 is emulated (voices, ADMA, mixing), on the host's clock; the game's IRX modules are recompiled but run on the emulated IOP kernel. Movie soundtracks are host audio. |
+| 6. Vblank | 🔧 | Frames and movies are paced on real time (FramePacer, the frame end and ADXM's vsync wait answered by the override), but the vblank and GS interrupts are still raised on EE time and the game's handlers run on them. |
+
+✅ done · 🔧 partly · ⏳ to do
 
 [RECOMP_NOTES.md](RECOMP_NOTES.md) records how the port was brought up, every fix and how it was found.
 
@@ -211,8 +230,9 @@ player 2:
 | `SC3_NATIVE_VU1=0` | Run the VU1 microprograms on the emulated VU1 instead of in C++ |
 | `SC3_NATIVE_VU1_PORT=0\|check` | Run the VU1 programs on the native sandbox (the AOT microcode on PS2Recomp's interpreter) instead of in C++, or both, compared |
 | `SC3_NATIVE_VU1_PORT_SKIP=<A:0x10,…>` | Keep those entries on the sandbox |
+| `SC3_NATIVE_VU1_DIRECT=0\|check\|@file` | Draw the C++ programs from their GIF packets (parsed, their register writes replayed on the GS) instead of directly, or both, compared; `@file` reads 0 / 1 / check at each frame end |
 | `SC3_NATIVE_VU0=0\|check` | Run the VU0 microprograms on PS2Recomp's interpreter instead of in C++, or both, compared (`SC3_NATIVE_VU0_LOG`, `SC3_NATIVE_VU0_RECORD` as for VU1) |
-| `SC3_NATIVE_VU1_LOG=1` | Every 5 s, MSCALs by entry; a line lists any left on the sandbox |
+| `SC3_NATIVE_VU1_LOG=1` | Every 5 s, MSCALs by entry, the direct draws' counts; a line lists any without a C++ port |
 | `SC3_NATIVE_VU1_RECORD=<file>` | Record sampled sandbox runs per entry (and, with `=check`, runs whose port differs) for `sc3_tests` (`SC3_VU1_TRACE`) |
 | `PS2X_VIF1_THREAD=0` | Run VIF1 and the VU1 microcode on the game thread (default: their own thread, about a third faster in fights) |
 | `PS2X_EE_CATCHUP=0\|field\|1` | Wall-clock catch-up: SC3 defaults to off, so emulated time never runs faster than real time |

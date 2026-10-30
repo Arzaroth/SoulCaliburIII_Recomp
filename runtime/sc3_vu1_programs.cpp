@@ -1,3 +1,4 @@
+#include "sc3_draw_sink.h"
 #include "sc3_vu1_port.h"
 
 #include "runtime/ps2_vu1_lifted_ops.h"
@@ -8,11 +9,11 @@
 
 namespace ps2x::vu1lift
 {
-    template <bool kSticky>
+    template <bool kSticky, bool kDirect>
     uint64_t programA(uint32_t entry, VU1State &state, uint8_t *data, uint32_t top, Vu1Kick out, void *user);
     template <bool kSticky>
     uint64_t programVu0(uint32_t entry, VU1State &state, uint8_t *data, uint32_t top, Vu1Kick out, void *user);
-    template <bool kSticky>
+    template <bool kSticky, bool kDirect>
     uint64_t programB(uint32_t entry, VU1State &state, uint8_t *data, uint32_t top, Vu1Kick out, void *user);
 }
 
@@ -85,9 +86,27 @@ namespace sc3
         const bool sticky = (state.status & 0x0C0u) != 0x0C0u;
         uint64_t cycles;
         if (program == kProgramA)
-            cycles = sticky ? ps2x::vu1lift::programA<true>(pc, state, data, top, kick, user) : ps2x::vu1lift::programA<false>(pc, state, data, top, kick, user);
+            cycles = sticky ? ps2x::vu1lift::programA<true, false>(pc, state, data, top, kick, user) : ps2x::vu1lift::programA<false, false>(pc, state, data, top, kick, user);
         else
-            cycles = sticky ? ps2x::vu1lift::programB<true>(pc, state, data, top, kick, user) : ps2x::vu1lift::programB<false>(pc, state, data, top, kick, user);
+            cycles = sticky ? ps2x::vu1lift::programB<true, false>(pc, state, data, top, kick, user) : ps2x::vu1lift::programB<false, false>(pc, state, data, top, kick, user);
+        state.top = top;
+        state.itop = itop;
+        return cycles;
+    }
+
+    uint64_t drawVu1Program(uint32_t program, uint32_t pc, VU1State &state, uint8_t *data, uint32_t top, uint32_t itop, DrawSink &sink)
+    {
+        if (program == kProgramB && pc == kSkinnedBodyPc && skinnedBodyReady(state))
+            return drawSkinnedBody(state, data, top, itop, sink);
+        const ps2x::vu1lift::RoundTowardZero rounding;
+        const bool sticky = (state.status & 0x0C0u) != 0x0C0u;
+        uint64_t cycles;
+        if (program == kProgramA)
+            cycles = sticky ? ps2x::vu1lift::programA<true, true>(pc, state, data, top, nullptr, &sink)
+                            : ps2x::vu1lift::programA<false, true>(pc, state, data, top, nullptr, &sink);
+        else
+            cycles = sticky ? ps2x::vu1lift::programB<true, true>(pc, state, data, top, nullptr, &sink)
+                            : ps2x::vu1lift::programB<false, true>(pc, state, data, top, nullptr, &sink);
         state.top = top;
         state.itop = itop;
         return cycles;
