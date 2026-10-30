@@ -1293,6 +1293,8 @@ namespace
     {
         // The IRX modules recompiled by scripts/iop_recomp.sh; PS2X_IOP_NATIVE=0 interprets them.
         setenv("PS2X_IOP_NATIVE", "1", 0);
+        // The IOP on the host's clock; PS2X_IOP_WALLCLOCK=0 puts it back on the EE cycles the game accounts.
+        setenv("PS2X_IOP_WALLCLOCK", "1", 0);
         if (std::getenv("PS2X_SC3_AUTOWIN"))
         {
             g_autoWinIrq = runtime.lookupFunction(kGsIrqHandler);
