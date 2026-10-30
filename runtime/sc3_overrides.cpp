@@ -750,23 +750,6 @@ namespace
 
     bool g_nativeFrames = false;
 
-    // A one-shot movie (the opening, the intro, story scenes) plays in a loop of its own that ends no frame of the
-    // main loop: the game runs on the vblanks until it ends. Looping ones are menu and loading-screen backgrounds.
-    bool oneShotMoviePlaying()
-    {
-        for (const auto &player : g_movies.all())
-            if (!player->loops() && player->active())
-                return true;
-        return false;
-    }
-
-    void followMovies(PS2Runtime *runtime)
-    {
-        const bool native = g_nativeFrames && !oneShotMoviePlaying();
-        if (runtime->eeScheduler().nativeFrames() != native)
-            runtime->eeScheduler().setNativeFrames(native);
-    }
-
     void mwPlyStartSkipped(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t a1 = getRegU32(ctx, 5);
@@ -794,7 +777,6 @@ namespace
             if (afsEntry(path, getRegU32(ctx, 6), offset, size) && player->start(path, offset, size, ctx->pc == kMwPlyStartAfsLp))
             {
                 g_movies.set(handle, std::move(player));
-                followMovies(runtime);
                 std::cerr << "[sc3] movie file " << getRegU32(ctx, 6) << " at 0x" << std::hex << offset << " size 0x" << size << std::dec << std::endl;
             }
         }
@@ -1243,16 +1225,7 @@ namespace
         }
         if (ra == kFrameEndReturn && !std::exchange(g_frameEndWoken, false))
         {
-            EeScheduler &scheduler = runtime->eeScheduler();
-            const bool wasNative = scheduler.nativeFrames();
-            followMovies(runtime);
-            if (scheduler.nativeFrames() && !wasNative)
-            {
-                g_frameEndCycle = scheduler.currentCycle();
-                g_eeLead = 0;
-                hostFrameStep();
-            }
-            if (scheduler.nativeFrames())
+            if (runtime->eeScheduler().nativeFrames())
                 endNativeFrame(runtime, [](R5900Context &resume)
                                {
                                    g_frameEndWoken = true;
@@ -1262,6 +1235,25 @@ namespace
                 traceFrame(runtime, hostFrameStep());
         }
         g_frameEndElapsedLines(rdram, ctx, runtime);
+    }
+
+    // While a one-shot movie plays, the main loop (0x12e64c) ends its frames in mwPly's vsync wait 0x3ae238 instead:
+    // ADXM's wait 0x3f0f38 sleeps the main thread in 0x3f0f10 until ADXM's vsync thread wakes it.
+    constexpr uint32_t kAdxmVsyncSleep = 0x003F0F10u;
+    constexpr uint32_t kAdxmVsyncSleepReturn = 0x003F0F60u;
+    constexpr uint32_t kMovieFrameWaitReturn = 0x0012E654u;
+    PS2Runtime::RecompiledFunction g_adxmVsyncSleep = nullptr;
+
+    void movieFrameEnd(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (getRegU32(ctx, 31) == kAdxmVsyncSleepReturn && runtime->memory().read32(getRegU32(ctx, 29)) == kMovieFrameWaitReturn)
+        {
+            endNativeFrame(runtime, [](R5900Context &resume)
+                           { resume.pc = kAdxmVsyncSleepReturn; });
+            ctx->pc = kAdxmVsyncSleepReturn;
+            return;
+        }
+        g_adxmVsyncSleep(rdram, ctx, runtime);
     }
 
     void applySoulcalibur3(PS2Runtime &runtime)
@@ -1293,6 +1285,9 @@ namespace
         }
         if (g_nativeFrames)
         {
+            g_adxmVsyncSleep = runtime.lookupFunction(kAdxmVsyncSleep);
+            if (g_adxmVsyncSleep)
+                runtime.registerFunction(kAdxmVsyncSleep, movieFrameEnd);
             runtime.eeScheduler().setNativeFrames(true);
             std::cerr << "[sc3] native frames: paced by the host (cap " << runtime.framePacer().cap()
                       << " fps, 0 = unlimited)" << std::endl;
