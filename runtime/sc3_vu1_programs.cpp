@@ -24,6 +24,8 @@ namespace sc3
         template <bool kSticky>
         uint64_t programA(uint32_t entry, VU1State &state, uint8_t *data, uint32_t top, Vu1Kick out, void *user);
         template <bool kSticky>
+        uint64_t programVu0(uint32_t entry, VU1State &state, uint8_t *data, uint32_t top, Vu1Kick out, void *user);
+        template <bool kSticky>
         uint64_t programB(uint32_t entry, VU1State &state, uint8_t *data, uint32_t top, Vu1Kick out, void *user);
 
         constexpr uint32_t kEntriesA[] = {0x10u, 0xd8u, 0x2b0u, 0x450u, 0x768u, 0xa48u, 0xc18u, 0xda8u, 0xf68u, 0x1268u,
@@ -34,6 +36,9 @@ namespace sc3
                                           0x15e8u, 0x1990u, 0x1a40u, 0x1ca8u, 0x1ef0u, 0x21e0u, 0x2290u, 0x24f8u, 0x2740u};
         constexpr uint32_t kTargetsB[] = {0xd8u, 0x350u, 0x5b0u, 0x910u, 0xb78u, 0xdd0u, 0x10f0u, 0x1388u,
                                           0x15e8u, 0x1a40u, 0x1ca8u, 0x1ef0u, 0x2290u, 0x24f8u, 0x2740u};
+
+        constexpr uint64_t kVu0Image = 0x5e40f8313a95b45full;
+        constexpr uint32_t kEntriesVu0[] = {0x0u, 0x18u, 0x38u, 0x60u, 0xf0u, 0x360u, 0x3c8u, 0x3e8u, 0x438u};
 
         template <size_t N>
         bool contains(const uint32_t (&list)[N], uint32_t pc)
@@ -82,7 +87,15 @@ namespace sc3
         return cycles;
     }
 
-    bool vu0Ported(uint64_t, uint32_t) { return false; }
+    bool vu0Ported(uint64_t image, uint32_t pc) { return image == vu1::kVu0Image && vu1::contains(vu1::kEntriesVu0, pc); }
 
-    uint64_t runVu0Program(uint64_t, uint32_t, VU1State &, uint8_t *) { return 0u; }
+    uint64_t runVu0Program(uint64_t, uint32_t pc, VU1State &state, uint8_t *data)
+    {
+        const vu1::RoundTowardZero rounding;
+        const bool sticky = (state.status & 0x0C0u) != 0x0C0u;
+        const uint64_t cycles = sticky ? vu1::programVu0<true>(pc, state, data, 0u, nullptr, nullptr)
+                                       : vu1::programVu0<false>(pc, state, data, 0u, nullptr, nullptr);
+        state.top = 0u;
+        return cycles;
+    }
 }

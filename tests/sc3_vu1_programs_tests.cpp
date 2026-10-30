@@ -224,5 +224,54 @@ void register_sc3_vu1_programs_tests()
             std::printf("  %zu runs ported, %zu differ; %zu not ported, %zu MSCNT\n", total, mismatches, skipped, resumed);
             t.Equals(mismatches, size_t{0}, "runs that differ");
         });
+
+        tc.Run("every ported VU0 microprogram leaves what the interpreter did on every recorded run", [](TestCase &t)
+        {
+            const char *path = std::getenv("SC3_VU0_TRACE");
+            if (!path || !*path)
+                return;
+            FILE *file = std::fopen(path, "rb");
+            t.IsNotNull(file, "the trace opens");
+            if (!file)
+                return;
+            constexpr uint32_t kVu0Memory = 4u * 1024u;
+            std::map<std::pair<uint64_t, uint32_t>, EntryStats> stats;
+            size_t total = 0, mismatches = 0, skipped = 0;
+            uint64_t image = 0;
+            Vu1TraceRecord record;
+            while (readVu1TraceRecord(file, record))
+            {
+                if (!record.code.empty())
+                    image = VU1Interpreter::codeHash(record.code.data(), kVu0Memory);
+                if (!sc3::vu0Ported(image, record.startPC))
+                {
+                    ++skipped;
+                    continue;
+                }
+                EntryStats &entry = stats[{image, record.startPC}];
+                Run port;
+                port.state = record.stateBefore;
+                port.data = record.dataBefore;
+                const auto begin = std::chrono::steady_clock::now();
+                port.cycles = sc3::runVu0Program(image, record.startPC, port.state, port.data.data());
+                entry.microseconds += std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - begin).count();
+                port.state.cycles = record.stateAfter.cycles;
+                ++entry.runs;
+                ++total;
+                const std::string diff = compare(port, record);
+                if (!diff.empty())
+                {
+                    if (entry.mismatches++ < 3)
+                        std::printf("  VU0 %08llx:%#x:%s\n", static_cast<unsigned long long>(image >> 32), record.startPC, diff.c_str());
+                    ++mismatches;
+                }
+            }
+            std::fclose(file);
+            for (const auto &[key, entry] : stats)
+                std::printf("  VU0 %08llx:%#x: %zu runs, %zu differ, %.2f us a run\n", static_cast<unsigned long long>(key.first >> 32),
+                            key.second, entry.runs, entry.mismatches, entry.runs ? entry.microseconds / entry.runs : 0.0);
+            std::printf("  %zu VU0 runs ported, %zu differ; %zu not ported\n", total, mismatches, skipped);
+            t.Equals(mismatches, size_t{0}, "VU0 runs that differ");
+        });
     });
 }

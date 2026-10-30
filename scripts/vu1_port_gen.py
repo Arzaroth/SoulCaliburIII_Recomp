@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""SC3's VU1 programs A and B as C++, from the microcode ps2_vu_aot compiled (generated/vu1): each instruction as the
-operation it does on registers held in locals, with what VU1Interpreter's pipeline makes timing-dependent (stalls and
-cycles, when Q, MAC and clip results become visible, the VI a branch reads, XGKICK waits) worked out here for every
-path from each start pc, so the C++ runs no pipeline. scripts/recomp.sh runs it.
+"""SC3's VU1 programs A and B and its VU0 microprograms as C++, from the microcode ps2_vu_aot compiled
+(generated/vu1): each instruction as the operation it does on registers held in locals, with what VU1Interpreter's
+pipeline makes timing-dependent (stalls and cycles, when Q, MAC and clip results become visible, the VI a branch
+reads, XGKICK waits) worked out here for every path from each start pc, so the C++ runs no pipeline.
+scripts/recomp.sh runs it.
 
-  scripts/vu1_port_gen.py <ps2_vu_aot output dir> <out dir>     writes sc3_vu1_a.cpp and sc3_vu1_b.cpp
-  scripts/vu1_port_gen.py --code <image.bin> <A|B> <out.cpp>   from a code image instead
+  scripts/vu1_port_gen.py <ps2_vu_aot output dir> <out dir>     writes sc3_vu1_a.cpp, sc3_vu1_b.cpp and sc3_vu0_program.cpp
+  scripts/vu1_port_gen.py --code <image.bin> <A|B|VU0> <out.cpp>   from a code image instead
 """
 import argparse
 import glob
@@ -210,7 +211,7 @@ class Lower:
             self.name = 'nop'
             return
         names = {0x00: 'lq', 0x01: 'sq', 0x04: 'ilw', 0x05: 'isw', 0x08: 'iaddiu', 0x09: 'isubiu', 0x12: 'fcand',
-                 0x1A: 'fmand', 0x20: 'b', 0x24: 'jr', 0x28: 'ibeq', 0x29: 'ibne', 0x2C: 'ibltz', 0x2D: 'ibgtz',
+                 0x1A: 'fmand', 0x1C: 'fcget', 0x20: 'b', 0x24: 'jr', 0x28: 'ibeq', 0x29: 'ibne', 0x2C: 'ibltz', 0x2D: 'ibgtz',
                  0x2E: 'iblez', 0x2F: 'ibgez'}
         if self.op in names:
             self.name = names[self.op]
@@ -225,7 +226,8 @@ class Lower:
         if funct < 0x3C:
             raise ValueError(f'unsupported lower {word:#010x}')
         sp = (word & 3) | ((word >> 4) & 0x7C)
-        f2 = {0x30: 'move', 0x34: 'lqi', 0x35: 'sqi', 0x38: 'div', 0x3C: 'mtir', 0x68: 'xtop', 0x6C: 'xgkick'}
+        f2 = {0x30: 'move', 0x31: 'mr32', 0x34: 'lqi', 0x35: 'sqi', 0x38: 'div', 0x39: 'sqrt', 0x3A: 'rsqrt', 0x3B: 'waitq',
+              0x3C: 'mtir', 0x68: 'xtop', 0x6C: 'xgkick'}
         if sp not in f2:
             raise ValueError(f'unsupported lower {word:#010x}')
         self.name = f2[sp]
@@ -307,6 +309,22 @@ class Lower:
             u.pipeline, u.latency = 'fdiv', 7
             u.add_vf_read(self.fs, lane_for_component(self.fsf))
             u.add_vf_read(self.ft, lane_for_component(self.ftf))
+        elif n == 'sqrt':
+            u.pipeline, u.latency = 'fdiv', 7
+            u.add_vf_read(self.ft, lane_for_component(self.ftf))
+        elif n == 'rsqrt':
+            u.pipeline, u.latency = 'fdiv', 13
+            u.add_vf_read(self.fs, lane_for_component(self.fsf))
+            u.add_vf_read(self.ft, lane_for_component(self.ftf))
+        elif n == 'waitq':
+            u.pipeline, u.wait_q = 'fdiv', True
+        elif n == 'mr32':
+            u.pipeline, u.latency = 'fmac', 4
+            u.add_vf_read(self.fs, 0xF)
+            u.add_vf_write(self.ft, self.dest)
+        elif n == 'fcget':
+            u.pipeline, u.latency, u.reads_clip = 'ialu', 1, True
+            wvi(self.it)
         elif n == 'mtir':
             u.pipeline, u.latency, u.delays_branch = 'ialu', 1, True
             u.add_vf_read(self.fs, lane_for_component(self.fsf))
@@ -435,8 +453,10 @@ class Node:
 
 
 class Program:
-    def __init__(self, pairs, name, track_mac, track_clip):
+    def __init__(self, pairs, name, track_mac, track_clip, unit='VU1'):
         self.pairs = pairs
+        self.mask = 0x3FFF if unit == 'VU1' else 0xFFF
+        self.data_mask = 0x3FF if unit == 'VU1' else 0xFF
         self.name = name
         self.track_mac = track_mac
         self.track_clip = track_clip
@@ -525,7 +545,7 @@ class Program:
             n.mac_src = s.mac
             if s.mac is not None and any(k == 'f' and pc == s.mac for _, k, pc in flags):
                 raise GenError(f'{self.name}: MAC of {s.mac:#x} read at {p.pc:#x} while it is written again')
-        if p.lower.name == 'fcand':
+        if p.lower.name in ('fcand', 'fcget'):
             n.clip_src = s.clip
             if s.clip is not None and any(k == 'c' and pc == s.clip for _, k, pc in flags):
                 raise GenError(f'{self.name}: clip of {s.clip:#x} read at {p.pc:#x} while it is written again')
@@ -546,8 +566,8 @@ class Program:
         if not self.track_clip:
             s.clip = None
         lo = p.lower
-        if lo.name == 'div':
-            s.fdiv = t + 7
+        if lo.name in ('div', 'sqrt', 'rsqrt'):
+            s.fdiv = t + (13 if lo.name == 'rsqrt' else 7)
         if lo.is_store():
             n.path1_store = s.kick
             s.wb = max(s.wb, t + 1)
@@ -610,16 +630,16 @@ class Program:
             if lo.name == 'jr':
                 outcomes.append((None, ('jr', 1)))
             elif lo.name == 'b':
-                outcomes.append((None, ((p.pc + 8 + lo.imm11 * 8) & 0x3FFF, 1)))
+                outcomes.append((None, ((p.pc + 8 + lo.imm11 * 8) & self.mask, 1)))
             else:
-                outcomes.append(('taken', ((p.pc + 8 + lo.imm11 * 8) & 0x3FFF, 1)))
+                outcomes.append(('taken', ((p.pc + 8 + lo.imm11 * 8) & self.mask, 1)))
                 outcomes.append(('not', None))
         else:
             outcomes.append((None, s.branch))
         for cond, branch in outcomes:
             ns = s.copy()
             ns._key = None
-            next_pcs = [(cond, (p.pc + 8) & 0x3FFF)]
+            next_pcs = [(cond, (p.pc + 8) & self.mask)]
             if branch is not None:
                 target, delay = branch
                 if delay == 0:
@@ -699,6 +719,9 @@ class Emitter:
                 right, rk = 'iReg', 'Scalar'
             fn = 'maxv' if k == 'max' else 'miniv'
             return dst, f'{fn}<R::{rk}, {d}>({dst}, {self.vf(u.fs)}, {right})'
+        if k == 'itof':
+            dst = f'vf{u.ft}' if u.ft else 'discard'
+            return dst, f'itof<{u.scale}, {d}>({dst}, {self.vf(u.fs)})'
         if k == 'ftoi':
             dst = f'vf{u.ft}' if u.ft else 'discard'
             return dst, f'ftoi<{u.scale}, {d}>({dst}, {self.vf(u.fs)})'
@@ -755,6 +778,17 @@ class Emitter:
         if nm == 'fcand':
             src = 'clip0' if n.clip_src is None else f'clip_{n.clip_src:04x}'
             return [f'vi1 = ({src} & {lo.imm24:#x}u) != 0u ? 1 : 0;']
+        if nm == 'fcget':
+            src = 'clip0' if n.clip_src is None else f'clip_{n.clip_src:04x}'
+            return [f'{vi(lo.it)} = static_cast<int32_t>({src} & 0xFFFu);'] if lo.it else []
+        if nm == 'mr32':
+            return [f'{vf(lo.ft)} = put<{lo.dest}>({vf(lo.ft)}, rotate({vf(lo.fs)}));'] if lo.ft else []
+        if nm == 'sqrt':
+            return [f'qPending = squareRoot(laneValue({vf(lo.ft)}, {lo.ftf}), diPending);']
+        if nm == 'rsqrt':
+            return [f'qPending = reciprocalRoot(laneValue({vf(lo.fs)}, {lo.fsf}), laneValue({vf(lo.ft)}, {lo.ftf}), diPending);']
+        if nm == 'waitq':
+            return []
         if nm == 'fmand':
             src = 'mac0' if n.mac_src is None else f'mac_{n.mac_src:04x}'
             return [f'{vi(lo.it)} = static_cast<int32_t>({src} & static_cast<uint32_t>(static_cast<uint16_t>({vi(lo.is_)})));'] if lo.it else []
@@ -763,7 +797,7 @@ class Emitter:
         if nm == 'xgkick':
             return [f'path.begin({vi(lo.is_)}, t);']
         if nm == 'jr':
-            return [f'jrTarget = (static_cast<uint32_t>(static_cast<uint16_t>({vi(lo.is_)})) * 8u) & 0x3FFFu;']
+            return [f'jrTarget = (static_cast<uint32_t>(static_cast<uint16_t>({vi(lo.is_)})) * 8u) & {self.prog.mask:#x}u;']
         if lo.is_branch():
             return []
         raise GenError(f'lower {nm} at {p.pc:#x} not written')
@@ -848,7 +882,7 @@ class Emitter:
                 self.out(f'lastMac = mac_{last:04x};')
                 self.out(f'lastCur = cur_{last:04x};')
                 self.out('hasFmac = true;')
-            self.out(f'endPc = {(n.pc + 8) & 0x3FFF:#x}u;')
+            self.out(f'endPc = {(n.pc + 8) & self.prog.mask:#x}u;')
             self.out('goto done;')
             return
         if len(n.succ) == 1:
@@ -876,7 +910,7 @@ class Emitter:
         self.out('template <bool kSticky>', 0)
         self.out(f'uint64_t {name}(uint32_t entry, VU1State &state, uint8_t *data, uint32_t top, Vu1Kick out, void *user)', 0)
         self.out('{', 0)
-        self.out('const Memory m{data};', 1)
+        self.out(f'const Memory<{self.prog.data_mask:#x}u> m{{data}};', 1)
         self.out('Fmac f;', 1)
         self.out('Path1 path;', 1)
         self.out('const __m128 kVf0 = _mm_setr_ps(0.0f, 0.0f, 0.0f, 1.0f);', 1)
@@ -973,6 +1007,8 @@ PROGRAMS = {
                        0x21e0, 0x2290, 0x24f8, 0x2740],
               targets=[0xd8, 0x350, 0x5b0, 0x910, 0xb78, 0xdd0, 0x10f0, 0x1388, 0x15e8, 0x1a40, 0x1ca8, 0x1ef0, 0x2290, 0x24f8,
                        0x2740]),
+    'VU0': dict(hash=0x5f8cbf2471656edf, pairs=172, function='programVu0', file='sc3_vu0_program.cpp', unit='VU0',
+                entries=[0x0, 0x18, 0x38, 0x60, 0xf0, 0x360, 0x3c8, 0x3e8, 0x438], targets=[]),
 }
 
 
@@ -985,9 +1021,10 @@ def code_hash(data):
 
 def code_from_aot(directory, spec):
     pairs = {}
-    for path in glob.glob(os.path.join(directory, f'vu1_aot_*_{spec["hash"]:016x}*.cpp')):
+    unit = spec.get('unit', 'VU1')
+    for path in glob.glob(os.path.join(directory, f'{unit.lower()}_aot_*_{spec["hash"]:016x}*.cpp')):
         text = open(path).read()
-        for m in re.finditer(r'kPair(\d+) = Vu::decodePair\(Vu::Unit::VU1, 0x([0-9a-f]+)u, 0x([0-9a-f]+)u\)', text):
+        for m in re.finditer(r'kPair(\d+) = Vu::decodePair\(Vu::Unit::' + unit + r', 0x([0-9a-f]+)u, 0x([0-9a-f]+)u\)', text):
             pairs[int(m[1])] = (int(m[2], 16), int(m[3], 16))
     if len(pairs) != spec['pairs'] or sorted(pairs) != list(range(spec['pairs'])):
         raise GenError(f'{directory}: the compiled microcode {spec["hash"]:016x} is not all there ({len(pairs)} pairs)')
@@ -999,8 +1036,8 @@ def generate(code, spec):
         raise GenError(f'the code image does not hash to {spec["hash"]:016x}')
     pairs = parse(code[:spec['pairs'] * 8])
     has_fmand = any(p is not None and p.lower.name == 'fmand' for p in pairs)
-    has_fcand = any(p is not None and p.lower.name == 'fcand' for p in pairs)
-    prog = Program(pairs, spec['function'], has_fmand, has_fcand)
+    has_fcand = any(p is not None and p.lower.name in ('fcand', 'fcget') for p in pairs)
+    prog = Program(pairs, spec['function'], has_fmand, has_fcand, spec.get('unit', 'VU1'))
     prog.build(spec['entries'], spec['targets'])
     name = spec['function']
     lines = ['#include "sc3_vu1_ops.h"', '', 'namespace sc3::vu1', '{', Emitter(prog, name).emit(), '']

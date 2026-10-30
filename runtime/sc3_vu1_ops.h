@@ -9,6 +9,7 @@
 
 #include <array>
 #include <bit>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -284,6 +285,17 @@ namespace sc3::vu1
         return put<kDest>(target, _mm_blendv_ps(floats(truncated), floats(_mm_set1_epi32(0x7FFFFFFF)), overflow));
     }
 
+    template <int kScaleBits, int kDest>
+    inline __m128 itof(__m128 target, __m128 vs)
+    {
+        __m128 value = _mm_cvtepi32_ps(bits(vs));
+        if constexpr (kScaleBits != 0)
+            value = _mm_div_ps(value, _mm_set1_ps(static_cast<float>(1u << kScaleBits)));
+        return put<kDest>(target, value);
+    }
+
+    inline __m128 rotate(__m128 value) { return _mm_shuffle_ps(value, value, _MM_SHUFFLE(0, 3, 2, 1)); }
+
     inline uint32_t clipFlags(__m128 vs, __m128 vt)
     {
         const uint32_t wBits = laneBits(vt, 3);
@@ -318,11 +330,36 @@ namespace sc3::vu1
         return normalizeOperand(result);
     }
 
+    inline float squareRoot(float value, uint32_t &di)
+    {
+        value = normalizeOperand(value);
+        di = value < 0.0f ? 0x10u : 0u;
+        return normalizeOperand(std::sqrt(std::fabs(value)));
+    }
+
+    inline float reciprocalRoot(float num, float radicand, uint32_t &di)
+    {
+        num = normalizeOperand(num);
+        radicand = normalizeOperand(radicand);
+        const float den = std::sqrt(std::fabs(radicand));
+        di = radicand < 0.0f ? 0x10u : 0u;
+        float result;
+        if (den != 0.0f)
+            result = num / den;
+        else
+        {
+            di = num == 0.0f ? 0x10u : 0x20u;
+            result = std::signbit(num) ? -std::numeric_limits<float>::max() : std::numeric_limits<float>::max();
+        }
+        return normalizeOperand(result);
+    }
+
+    template <uint32_t kQwordMask>
     struct Memory
     {
         uint8_t *data;
 
-        uint8_t *at(int32_t qword) const { return data + ((static_cast<uint32_t>(qword) & 0x3FFu) << 4); }
+        uint8_t *at(int32_t qword) const { return data + ((static_cast<uint32_t>(qword) & kQwordMask) << 4); }
         __m128 lq(int32_t qword) const { return _mm_loadu_ps(reinterpret_cast<const float *>(at(qword))); }
         template <int kDest>
         void sq(int32_t qword, __m128 value) const
