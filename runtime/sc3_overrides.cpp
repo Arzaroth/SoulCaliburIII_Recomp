@@ -2,6 +2,7 @@
 #include "ps2_runtime.h"
 #include "ps2_recompiled_functions.h"
 #include "runtime/ee_scheduler.h"
+#include "sc3_native.h"
 
 #include <algorithm>
 #include <atomic>
@@ -1152,6 +1153,22 @@ namespace
     // EE time follows real time over the whole run, not frame by frame: a frame that accounts more cycles than it took
     // (spinning on the GS) leaves a lead the next frames use up, or the IOP runs ahead and the SPU2 drops what it mixes.
     // The FramePacer's step stops at 0.1 s, but a load stalls a frame for longer: a deficit is charged up to a second.
+    void followFrameCapFile(PS2Runtime *runtime)
+    {
+        static const char *path = std::getenv("SC3_FRAME_CAP_FILE");
+        if (!path || !*path)
+            return;
+        std::ifstream file(path);
+        long cap = -1;
+        if (!(file >> cap) || cap < 0)
+            return;
+        if (runtime->framePacer().cap() != static_cast<uint32_t>(cap))
+        {
+            runtime->framePacer().setCap(static_cast<uint32_t>(cap));
+            std::cerr << "[sc3] frame cap " << cap << " (SC3_FRAME_CAP_FILE)" << std::endl;
+        }
+    }
+
     double nativeFrameEnd(PS2Runtime *runtime)
     {
         EeScheduler &scheduler = runtime->eeScheduler();
@@ -1204,6 +1221,7 @@ namespace
             EeScheduler &scheduler = runtime->eeScheduler();
             const bool wasNative = scheduler.nativeFrames();
             followMovies(runtime);
+            followFrameCapFile(runtime);
             if (scheduler.nativeFrames() && !wasNative)
             {
                 g_frameEndCycle = scheduler.currentCycle();
@@ -1315,7 +1333,8 @@ namespace
         // (Free Training 22 -> 18 fps), and the game does not need the stall to draw correctly.
         runtime.memory().setSignalStallEnabled(false);
         // The native GS renderer (GSNativeBackend, OpenGL) by default; PS2X_GS_RENDERER=parallel or cpu chooses another.
-        const char *gsRenderer = runtime.requestNativeGsRenderer()            ? "native (OpenGL)"
+        const bool nativeGs = runtime.requestNativeGsRenderer();
+        const char *gsRenderer = nativeGs                                     ? "native (OpenGL)"
                                  : runtime.gs().requestParallelRenderer() ? "paraLLEl-GS"
                                                                           : "CPU";
         std::cerr << "[sc3] GS renderer: " << gsRenderer << std::endl;
@@ -1340,6 +1359,7 @@ namespace
             runtime.registerFunction(kInitAfsUpdate, initAfsUpdateTraced);
         if (const char *trace = std::getenv("PS2X_SC3_TRACE_TASKS"); trace && *trace)
             runtime.registerFunction(kCreateTask, createTaskTraced);
+        sc3::installNativeVu1(runtime, nativeGs);
     }
 }
 

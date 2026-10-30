@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # usage: scripts/regress.sh <build-dir> <out-dir>
 # Scripted regression route: boot with movies off, title, Mode Select, Single Player Modes, Practice into a Free
-# Training fight, a minute of attacks, then stop. Each press waits for a number of presented frames rather than a
-# fixed time, so a slow start does not throw the route off. Exits 0 once the run itself completed; the verdict is in
-# <out-dir>/summary.txt (key=value, NA when unknown). Also writes run.log, last_frame.png (last_frame.raw, 640x448
-# RGBA, without a PNG), errors.txt, details.txt and pad.txt (each press with its time and presented frame).
+# Training fight, a minute of attacks, the pause menu, then stop. Each press waits for a number of presented frames
+# rather than a fixed time, so a slow start does not throw the route off. Exits 0 once the run itself completed; the
+# verdict is in <out-dir>/summary.txt (key=value, NA when unknown). Also writes run.log, last_frame.png
+# (last_frame.raw, 640x448 RGBA, without a PNG), pause.png (the fight frozen under the pause menu, the same scene for as
+# long as it stays paused: the still to compare renderers with, scripts/imgdiff.py), errors.txt, details.txt and
+# pad.txt (each press with its time and presented frame).
 #   route_reached     1 once every press of the route and the fight's attacks were played without a hang or crash
 #   exit              ok, hang (process alive, presented frame unchanged for REGRESS_HANG_SECS), crash (process
 #                     ended early), timeout (still alive 10 s after being told to stop)
@@ -16,6 +18,20 @@
 #                     AutoDMA input halves the SPU2 found empty while the game streams (ADX), from the state dump
 #   REGRESS_HANG_SECS   default 20
 #   REGRESS_FIGHT_SECS  length of the fight (default 60)
+#   REGRESS_PAUSE_SECS  presented-frame dumps (one a second) to wait in the pause menu before pause.png (default 3)
+#   REGRESS_SHOT_SECS   seconds between the captures in shots/ (default 5)
+#   REGRESS_FIGHT_FRAME_CAP=<fps>
+#                     the frame cap from the fight's start on (SC3_FRAME_CAP_FILE; 0 = uncapped), the menus before it
+#                     at the default cap: uncapped menus run ahead of the route's presses
+#   REGRESS_KEEP_SHOTS=1
+#                     keeps shots/ (frame_<tenths of a second>.png), to compare effects between two runs
+#   REGRESS_NATIVE_VU1_AB=1
+#                     the run on VU1 with SC3_NATIVE_VU1=1 switched off (SC3_NATIVE_VU1_SWITCH); in the pause menu
+#                     pause_vu1.png a little after pause.png (pause_floor_psnr: how still the pause is), then the
+#                     sandbox switched on for pause_native.png (pause_native_psnr, against pause.png)
+#   REGRESS_PAUSE_HIDE="A:0x10 B:0x1388 ..."
+#                     in the pause menu, one still per entry with that VU1 program hidden (SC3_NATIVE_VU1_HIDE), as
+#                     pause_hide_<entry>.png, and pause_hide.txt: each one's imgdiff against pause.png
 #   SC3_ELF             game ELF (default: game/SLUS_212.16 of this repo)
 #   PS2X_SPU2_WALLCLOCK default 1, as scripts/run.sh
 set -euo pipefail
@@ -27,6 +43,9 @@ out=$2
 elf=${SC3_ELF:-$root/game/SLUS_212.16}
 hang_secs=${REGRESS_HANG_SECS:-20}
 fight_secs=${REGRESS_FIGHT_SECS:-60}
+pause_secs=${REGRESS_PAUSE_SECS:-3}
+shot_secs=${REGRESS_SHOT_SECS:-5}
+keep_shots=${REGRESS_KEEP_SHOTS:-0}
 period=5
 
 runner=
@@ -49,9 +68,27 @@ frames=$out/frames
 shots=$out/shots
 log=$out/run.log
 input=$out/pad_input.txt
-rm -rf "$frames" "$shots" "$out"/last_frame.* "$out/summary.txt" "$out/details.txt" "$out/errors.txt" "$out/pad.txt"
+rm -rf "$frames" "$shots" "$out"/last_frame.* "$out"/pause*.png "$out"/pause_hide.txt "$out/summary.txt" "$out/details.txt" "$out/errors.txt" "$out/pad.txt"
 mkdir -p "$frames" "$shots"
 : > "$input"
+native_switch=
+if [ "${REGRESS_NATIVE_VU1_AB:-0}" = 1 ]; then
+    native_switch=$out/native_vu1.switch
+    echo 0 > "$native_switch"
+    export SC3_NATIVE_VU1=1 SC3_NATIVE_VU1_SWITCH="$native_switch"
+fi
+cap_file=
+if [ -n "${REGRESS_FIGHT_FRAME_CAP:-}" ]; then
+    cap_file=$out/frame_cap
+    rm -f "$cap_file"
+    export SC3_FRAME_CAP_FILE="$cap_file"
+fi
+hide_file=
+if [ -n "${REGRESS_PAUSE_HIDE:-}" ]; then
+    hide_file=$out/native_vu1.hide
+    : > "$hide_file"
+    export SC3_NATIVE_VU1_HIDE="@$hide_file"
+fi
 : > "$log"
 
 pid=
@@ -65,7 +102,7 @@ start=$(date +%s)
     exec env DISPLAY="${DISPLAY:-:0}" WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}" PS2X_DEBUG_UI=0 \
         PS2X_SPU2_STATS=1 PS2X_SC3_NO_MOVIES=1 PS2X_STATE_DUMP=$period \
         PS2X_FRAME_DUMP="$frames" PS2X_FRAME_DUMP_EVERY=1 \
-        PS2X_CAPTURE_DIR="$shots" PS2X_CAPTURE_INTERVAL=$period PS2X_PAD_INPUT="$input" \
+        PS2X_CAPTURE_DIR="$shots" PS2X_CAPTURE_INTERVAL=$shot_secs PS2X_PAD_INPUT="$input" \
         "$runner" "$elf"
 ) > "$log" 2>&1 &
 pid=$!
@@ -132,6 +169,7 @@ route()
     press RIGHT; await 2 || return 1
     for i in 1 2 3 4 5; do press CROSS; await 4 || return 1; done
     await 20 || return 1
+    [ -z "$cap_file" ] || echo "$REGRESS_FIGHT_FRAME_CAP" > "$cap_file"
     fight_mark=$(grep -a -c '^\[state\] gs frames=' "$log" || true)
     fight_at_s=$(( $(date +%s) - start ))
     local t=0
@@ -141,7 +179,33 @@ route()
         press RIGHT; await 1 || return 1
         t=$((t + 3))
     done
+    press START; await "$pause_secs" || return 1
+    pause_still pause.png
+    if [ -n "$native_switch" ]; then
+        await "$pause_secs" || return 1
+        pause_still pause_vu1.png
+        echo 1 > "$native_switch"
+        await "$pause_secs" || return 1
+        pause_still pause_native.png
+    fi
+    if [ -n "$hide_file" ]; then
+        local entry
+        for entry in $REGRESS_PAUSE_HIDE; do
+            echo "$entry" > "$hide_file"
+            await "$pause_secs" || return 1
+            pause_still "pause_hide_$(echo "$entry" | tr ':*' '__').png"
+        done
+        : > "$hide_file"
+    fi
     route_reached=1
+}
+
+pause_still()
+{
+    local newest
+    newest=$(ls "$frames" | sort -t_ -k2 -n | tail -1)
+    [ -n "$newest" ] || return 0
+    python3 -I "$root/scripts/imgdiff.py" --png "$frames/$newest" "$out/$1" || true
 }
 
 route_reached=0
@@ -162,12 +226,13 @@ fi
 
 last=$(ls "$shots" | sort | tail -1)
 if [ -n "$last" ]; then
-    mv "$shots/$last" "$out/last_frame.png"
+    cp "$shots/$last" "$out/last_frame.png"
 else
     last=$(ls "$frames" | sort -t_ -k2 -n | tail -1)
     if [ -n "$last" ]; then mv "$frames/$last" "$out/last_frame.raw"; fi
 fi
-rm -rf "$frames" "$shots" "$input"
+rm -rf "$frames" "$input"
+[ "$keep_shots" = 1 ] || rm -rf "$shots"
 
 gs_samples() { grep -a '^\[state\] gs frames=' "$log" | sed 's/^\[state\] gs frames=\([0-9]*\).*/\1/'; }
 if [ -n "$fight_mark" ]; then
@@ -190,6 +255,24 @@ underruns=$(grep -ao '^\[spu2:stats\].* underruns [0-9]*' "$log" | tail -1 | awk
 adma_underruns=$(grep -ao '^\[state\] *\[SPU2\] samples=.*underruns [0-9]*' "$log" | tail -1 | awk '{ print $NF }' || true)
 grep -a -v '^\[state\]' "$log" | grep -a -i -E "$errors" \
     | sed -E 's/0x[0-9a-fA-F]+/X/g; s/[0-9]+/N/g' | sort | uniq -c | sort -rn > "$out/errors.txt" || true
+pause_psnr()
+{
+    if [ -f "$out/pause.png" ] && [ -f "$out/$1" ]; then
+        python3 -I "$root/scripts/imgdiff.py" "$out/pause.png" "$out/$1" --diff "$out/${1%.png}_diff.png" \
+            | sed -n 's/^psnr=\([^ ]*\).*/\1/p'
+    else
+        echo NA
+    fi
+}
+pause_floor_psnr=$(pause_psnr pause_vu1.png)
+pause_native_psnr=$(pause_psnr pause_native.png)
+if [ -n "$hide_file" ]; then
+    for entry in $REGRESS_PAUSE_HIDE; do
+        still=pause_hide_$(echo "$entry" | tr ':*' '__').png
+        [ -f "$out/$still" ] || continue
+        echo "$entry $(python3 -I "$root/scripts/imgdiff.py" "$out/pause.png" "$out/$still" --diff "$out/${still%.png}_diff.png")"
+    done > "$out/pause_hide.txt"
+fi
 error_lines=$(grep -a -v '^\[state\]' "$log" | grep -a -c -i -E "$errors" || true)
 warning_lines=$(grep -a -v '^\[state\]' "$log" | grep -a -c -i 'warn' || true)
 
@@ -209,6 +292,8 @@ spu2_underruns=${underruns:-NA}
 spu2_adma_underruns=${adma_underruns:-NA}
 error_lines=$error_lines
 warning_lines=$warning_lines
+pause_floor_psnr=$pause_floor_psnr
+pause_native_psnr=$pause_native_psnr
 EOF
 cat > "$out/details.txt" <<EOF
 fight_at_s=$fight_at_s
